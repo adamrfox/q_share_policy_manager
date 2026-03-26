@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qumulo Policy Manager</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --bg4: #2d333b;
+    --border: #30363d;
+    --border2: #444c56;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --text3: #6e7681;
+    --accent: #2f81f7;
+    --accent2: #1f6feb;
+    --accent-bg: rgba(47,129,247,0.12);
+    --success: #3fb950;
+    --success-bg: rgba(63,185,80,0.12);
+    --warning: #d29922;
+    --warning-bg: rgba(210,153,34,0.12);
+    --danger: #f85149;
+    --danger-bg: rgba(248,81,73,0.12);
+    --nfs: #58a6ff;
+    --nfs-bg: rgba(88,166,255,0.1);
+    --smb: #a5d6ff;
+    --smb-bg: rgba(165,214,255,0.08);
+    --radius: 8px;
+    --radius-sm: 5px;
+    --font: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: 260px 1fr;
+    overflow: hidden;
+  }
+
+  /* ── Topbar ── */
+  #topbar {
+    grid-column: 1 / -1;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+  }
+  #topbar .logo {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #topbar .logo svg { width: 22px; height: 22px; }
+  #topbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+  #topbar .nav-pills { display: flex; gap: 2px; }
+  #topbar .nav-pill {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all .15s;
+    border: none;
+    background: none;
+  }
+  #topbar .nav-pill:hover { background: var(--bg3); color: var(--text); }
+  #topbar .nav-pill.active { background: var(--accent-bg); color: var(--accent); }
+  #topbar .spacer { flex: 1; }
+  #conn-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text2);
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  #conn-status:hover { border-color: var(--border2); }
+  #conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); transition: background .3s; }
+  #conn-dot.ok { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  #conn-dot.err { background: var(--danger); }
+  #conn-dot.busy { background: var(--warning); }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-section {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--text3);
+    padding: 6px 8px 4px;
+  }
+  .policy-item {
+    display: flex;
+    align-items: center;
+    padding: 7px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all .12s;
+    gap: 8px;
+  }
+  .policy-item:hover { background: var(--bg3); }
+  .policy-item.active { background: var(--accent-bg); }
+  .policy-item .pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .pill-nfs { background: var(--nfs-bg); color: var(--nfs); border: 1px solid rgba(88,166,255,.25); }
+  .pill-smb { background: var(--smb-bg); color: var(--smb); border: 1px solid rgba(165,214,255,.2); }
+  .pill-both { background: rgba(138,101,255,.12); color: #a78bfa; border: 1px solid rgba(138,101,255,.2); }
+  .policy-name { font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn-del-policy {
+    width: 20px; height: 20px; border-radius: 4px;
+    background: transparent; border: none;
+    color: var(--text3); font-size: 16px; line-height: 1;
+    cursor: pointer; flex-shrink: 0; opacity: 0;
+    transition: all .12s; display: flex; align-items: center; justify-content: center;
+  }
+  .policy-item:hover .btn-del-policy { opacity: 1; }
+  .btn-del-policy:hover { background: var(--danger-bg); color: var(--danger); }
+  #sidebar-footer { padding: 8px; margin-top: auto; border-top: 1px solid var(--border); }
+  .btn-new {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-new:hover { background: var(--accent2); }
+
+  /* ── Main panel ── */
+  #main {
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .view { display: none; padding: 24px; }
+  .view.active { display: block; }
+
+  /* ── Policy Editor ── */
+  .editor-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .editor-header h2 { font-size: 18px; font-weight: 600; flex: 1; }
+  .btn {
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+    transition: all .15s;
+  }
+  .btn:hover { background: var(--bg3); border-color: var(--border2); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
+  .btn-danger { color: var(--danger); border-color: var(--danger-bg); }
+  .btn-danger:hover { background: var(--danger-bg); }
+  .btn-success { background: var(--success); border-color: var(--success); color: #000; font-weight: 600; }
+  .btn-success:hover { filter: brightness(1.1); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  .form-group { margin-bottom: 16px; }
+  .form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text2);
+    margin-bottom: 5px;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+  }
+  .form-input {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text);
+    font-family: var(--font-ui);
+    outline: none;
+    transition: border-color .15s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-input[type="checkbox"] { width: auto; }
+  select.form-input { cursor: pointer; }
+  textarea.form-input { resize: vertical; min-height: 80px; font-family: var(--font); font-size: 12px; }
+
+  .tabs { display: flex; gap: 1px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text2);
+    border-bottom: 2px solid transparent;
+    transition: all .15s;
+    margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .toggle-row .toggle { flex-shrink: 0; margin-left: 0; }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: 13px; color: var(--text); }
+  .toggle-desc { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .toggle {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--bg4);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: .2s;
+    border: 1px solid var(--border);
+  }
+  .toggle-slider:before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 2px;
+    top: 2px;
+    background: var(--text2);
+    border-radius: 50%;
+    transition: .2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(16px); background: #fff; }
+
+  /* Host access list */
+  .host-list { display: flex; flex-direction: column; gap: 4px; }
+  .host-entry {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .host-entry .form-input { flex: 1; }
+  .btn-remove {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    transition: all .12s;
+    line-height: 1;
+  }
+  .btn-remove:hover { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+
+  /* ── Apply view ── */
+  .apply-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .cluster-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .cluster-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  #share-select { font-family: var(--font); font-size: 12px; }
+  #share-select option { padding: 5px 8px; }
+  .path-browser {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .path-browser-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font);
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .path-browser-bar .pb-cwd {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--accent);
+  }
+  .path-browser-list {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .pb-entry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-family: var(--font);
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background .1s;
+    color: var(--text);
+  }
+  .pb-entry:last-child { border-bottom: none; }
+  .pb-entry:hover { background: var(--bg3); }
+  .pb-entry.pb-dir { color: var(--accent); }
+  .pb-entry.pb-up { color: var(--text3); font-style: italic; }
+  .pb-icon { font-size: 13px; flex-shrink: 0; }
+  .pb-checkbox {
+    width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; accent-color: var(--accent);
+  }
+  .pb-entry.pb-selected { background: var(--accent-bg); }
+  .pb-queue {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .pb-queue-entry {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 6px;
+    align-items: center;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  .pb-queue-path { font-family: var(--font); color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pb-queue-actions { display: flex; gap: 4px; justify-content: flex-end; }
+  .pb-select-btn {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 2px 7px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid rgba(47,129,247,.3);
+    border-radius: 3px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .1s;
+  }
+  .pb-entry:hover .pb-select-btn { opacity: 1; }
+  .pb-loading { padding: 12px 10px; font-size: 12px; color: var(--text3); font-family: var(--font); }
+
+  /* ── Log ── */
+  #log-view { padding: 24px; }
+  .log-entry {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .log-time { color: var(--text3); white-space: nowrap; font-family: var(--font); }
+  .log-level { width: 48px; flex-shrink: 0; font-weight: 600; font-family: var(--font); }
+  .log-level.info { color: var(--accent); }
+  .log-level.ok { color: var(--success); }
+  .log-level.err { color: var(--danger); }
+  .log-level.warn { color: var(--warning); }
+  .log-msg { color: var(--text); font-family: var(--font); word-break: break-all; }
+
+  /* ── Modal ── */
+  #modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  #modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 20px;
+    min-width: 360px;
+    max-width: 520px;
+    width: 100%;
+  }
+  .modal h3 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  /* Toast */
+  #toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 200;
+  }
+  .toast {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 13px;
+    animation: slideIn .2s ease-out;
+    max-width: 320px;
+  }
+  .toast.ok { border-left: 3px solid var(--success); }
+  .toast.err { border-left: 3px solid var(--danger); }
+  .toast.info { border-left: 3px solid var(--accent); }
+  @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  /* Misc */
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text3);
+  }
+  .empty-state .big { font-size: 32px; margin-bottom: 8px; }
+  .badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: var(--warning-bg);
+    color: var(--warning);
+    border: 1px solid rgba(210,153,34,.2);
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .flex { display: flex; }
+  .items-center { align-items: center; }
+  .gap-8 { gap: 8px; }
+  .text-muted { color: var(--text2); }
+  .text-sm { font-size: 12px; }
+  .mt-4 { margin-top: 4px; }
+  .notice {
+    background: var(--warning-bg);
+    border: 1px solid rgba(210,153,34,.2);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--warning);
+    margin-bottom: 12px;
+  }
+  .notice.info {
+    background: var(--accent-bg);
+    border-color: rgba(47,129,247,.25);
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar -->
+<div id="topbar">
+  <div class="logo">
+    <svg viewBox="0 0 22 22" fill="none">
+      <rect x="1" y="1" width="20" height="20" rx="5" stroke="#2f81f7" stroke-width="1.5"/>
+      <path d="M6 11h10M11 6v10" stroke="#2f81f7" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="11" cy="11" r="2.5" fill="#2f81f7"/>
+    </svg>
+    Qumulo Policy Manager
+  </div>
+  <div class="sep"></div>
+  <div class="nav-pills">
+    <button class="nav-pill active" onclick="showView('policies')">Policies</button>
+    <button class="nav-pill" onclick="showView('apply')">Apply</button>
+    <button class="nav-pill" onclick="showView('log')">Activity Log</button>
+  </div>
+  <div class="spacer"></div>
+  <button id="conn-status" onclick="openClusterModal()">
+    <div id="conn-dot"></div>
+    <span id="conn-label">Not connected</span>
+  </button>
+</div>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <div class="sidebar-section" style="padding:8px">
+    <input class="form-input" id="search-input" placeholder="Search policies…" oninput="renderSidebar()" style="font-size:12px;">
+  </div>
+  <div style="flex:1;overflow-y:auto">
+    <div class="sidebar-label">NFS Policies</div>
+    <div id="list-nfs"></div>
+    <div class="sidebar-label">SMB Policies</div>
+    <div id="list-smb"></div>
+    <div class="sidebar-label">Combined</div>
+    <div id="list-both"></div>
+  </div>
+  <div id="sidebar-footer">
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <button class="btn btn-sm" style="flex:1" onclick="importPolicies()">Import JSON</button>
+      <button class="btn btn-sm" style="flex:1" onclick="exportPolicies()">Export JSON</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">
+      <button class="btn-new" onclick="newPolicy('nfs')" style="font-size:11px;padding:7px 4px">+ NFS</button>
+      <button class="btn-new" onclick="newPolicy('smb')" style="font-size:11px;padding:7px 4px;background:var(--bg4);border:1px solid var(--border2)">+ SMB</button>
+      <button class="btn-new" onclick="newPolicy('both')" style="font-size:11px;padding:7px 4px;background:#2d2040;border:1px solid rgba(138,101,255,.3);color:#a78bfa">+ Both</button>
+    </div>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Policies view -->
+  <div class="view active" id="view-policies">
+    <div id="editor-area">
+      <div class="empty-state">
+        <div class="big">⚡</div>
+        <div style="font-size:15px;font-weight:600;color:var(--text2);margin-bottom:6px">No policy selected</div>
+        <div style="font-size:13px">Select a policy from the sidebar or create a new one.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apply view -->
+  <div class="view" id="view-apply">
+    <div class="editor-header">
+      <h2>Apply Policy to Cluster</h2>
+    </div>
+    <div id="apply-panel">
+      <div class="notice info">Connect to a Qumulo cluster first, then select a policy and target share/export below.</div>
+      <div class="grid-2">
+        <div>
+          <div class="form-group">
+            <label class="form-label">Policy</label>
+            <select class="form-input" id="apply-policy-select"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Action</label>
+            <select class="form-input" id="apply-action">
+              <option value="apply-existing">Apply to existing share/export</option>
+              <option value="create-new">Create new share/export with policy</option>
+            </select>
+          </div>
+          <div id="create-new-fields" style="display:none">
+            <div id="create-new-dynamic"></div>
+            <div class="toggle-row" style="margin-bottom:12px">
+              <label class="toggle"><input type="checkbox" id="new-allow-path-create" checked><span class="toggle-slider"></span></label>
+              <div>
+                <div class="toggle-label">Allow path create</div>
+                <div class="toggle-desc">Create the file system path if it does not exist</div>
+              </div>
+            </div>
+          </div>
+          <div id="existing-fields">
+            <div class="form-group">
+              <label class="form-label">Select target <span id="target-proto-label">share/export</span> <span id="share-count" style="font-weight:400;color:var(--text3);text-transform:none;letter-spacing:0"></span></label>
+              <input class="form-input" id="share-filter" placeholder="Filter by name or path…" oninput="filterShares()" style="margin-bottom:6px">
+              <select class="form-input" id="share-select" size="8" multiple style="height:auto;padding:0" onchange="selectShareFromDropdown(this)">
+                <option disabled value="">— connect to cluster to load —</option>
+              </select>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px">Ctrl/Cmd+click to select multiple</div>
+            </div>
+            <div class="toggle-row" style="margin-bottom:12px">
+              <label class="toggle"><input type="checkbox" id="existing-allow-path-create" checked><span class="toggle-slider"></span></label>
+              <div>
+                <div class="toggle-label">Allow path create</div>
+                <div class="toggle-desc">Create the file system path if it does not exist</div>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-success" onclick="applyPolicy()" style="width:100%">Apply Policy →</button>
+        </div>
+        <div>
+          <div class="cluster-panel">
+            <div class="cluster-title">Dry-run preview</div>
+            <div id="dry-run-preview" style="font-family:var(--font);font-size:11px;color:var(--text2);white-space:pre-wrap">
+Select a policy and target to preview the API call.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log view -->
+  <div class="view" id="view-log">
+    <div class="editor-header">
+      <h2>Activity Log</h2>
+      <button class="btn btn-sm btn-danger" onclick="clearLog()">Clear</button>
+    </div>
+    <div id="log-entries"></div>
+  </div>
+
+</div>
+
+<!-- Cluster modal -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Cluster Connection</h3>
+    <div class="form-group">
+      <label class="form-label">Cluster hostname / IP</label>
+      <input class="form-input" id="m-host" placeholder="192.168.1.100 or cluster.local">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Port</label>
+      <input class="form-input" id="m-port" value="8000" type="number">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Username</label>
+      <input class="form-input" id="m-user" value="admin">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input class="form-input" id="m-pass" type="password">
+    </div>
+    <div class="toggle-row" style="margin-bottom:8px">
+      <div>
+        <div class="toggle-label">Use insecure proxy for self-signed certs</div>
+        <div class="toggle-desc">Routes API calls through the local nginx proxy with SSL verification disabled</div>
+      </div>
+      <label class="toggle" style="margin-left:12px">
+        <input type="checkbox" id="m-insecure" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="notice" id="insecure-note">
+      Insecure mode: calls will be routed through the local nginx proxy (<code>/proxy/</code>) which forwards to the cluster with certificate validation disabled. Safe for self-signed cluster certs on your local network.
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModalDirect()">Cancel</button>
+      <button class="btn btn-primary" onclick="connectCluster()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Hidden file input for import -->
+<input type="file" id="file-import" accept=".json" style="display:none" onchange="handleImport(event)">
+
+<script>
+// ══════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════
+let policies = JSON.parse(localStorage.getItem('qpm-policies') || '[]');
+// Migrate: ensure require_privileged_port defaults to true on any existing restriction
+policies.forEach(p => { (p.nfs?.restrictions||[]).forEach(r => { if (r.require_privileged_port === false) r.require_privileged_port = true; }); });
+let cluster = JSON.parse(localStorage.getItem('qpm-cluster') || 'null');
+let activePolicy = null;
+let activityLog = [];
+let clusterShares = { nfs: [], smb: [] };
+let selectedShares = []; // array of {id, proto, name}
+
+// Default policy templates — paths/names are never stored in policies, only applied at deploy time
+const NFS_DEFAULTS = {
+  description: '',
+  read_only: false,
+  anonymous_uid: 65534,
+  anonymous_gid: 65534,
+  restrictions: [
+    { host_restrictions: [], read_only: false, require_privileged_port: true,
+      user_mapping: 'NFS_MAP_NONE', map_to_user_id: '0', map_to_group_id: '0',
+      required_authentication_mode: 'AUTHENTICATION_MODE_NONE' }
+  ]
+};
+
+const SMB_DEFAULTS = {
+  description: '',
+  read_only: false,
+  allow_guest_access: false,
+  require_encryption: false,
+  hide_previous_versions: false,
+  directory_oplock_enabled: true,
+  bytes_per_sector: 512,
+  default_dir_create_mode: '0755',
+  default_file_create_mode: '0644',
+  network_permissions: []
+};
+
+// ══════════════════════════════════════════════
+// Persistence
+// ══════════════════════════════════════════════
+function save() {
+  localStorage.setItem('qpm-policies', JSON.stringify(policies));
+  if (cluster) localStorage.setItem('qpm-cluster', JSON.stringify(cluster));
+}
+
+// ══════════════════════════════════════════════
+// View routing
+// ══════════════════════════════════════════════
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'apply') refreshApplyView();
+  if (name === 'log') renderLog();
+}
+
+// ══════════════════════════════════════════════
+// Sidebar
+// ══════════════════════════════════════════════
+function renderSidebar() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  ['nfs', 'smb', 'both'].forEach(type => {
+    const list = document.getElementById('list-' + type);
+    const items = policies.filter(p =>
+      (type === 'both' ? p.type === 'both' : p.type === type) &&
+      (!q || p.name.toLowerCase().includes(q))
+    );
+    list.innerHTML = items.length === 0
+      ? `<div style="padding:4px 16px;font-size:12px;color:var(--text3)">None</div>`
+      : items.map(p => `
+        <div class="policy-item ${activePolicy?.id === p.id ? 'active' : ''}" onclick="selectPolicy('${p.id}')">
+          <span class="pill pill-${p.type}">${p.type.toUpperCase()}</span>
+          <span class="policy-name">${p.name}</span>
+          <button class="btn-del-policy" onclick="event.stopPropagation();deletePolicy('${p.id}')" title="Delete policy">×</button>
+        </div>`).join('');
+  });
+}
+
+// ══════════════════════════════════════════════
+// Policy CRUD
+// ══════════════════════════════════════════════
+function newPolicy(type = 'nfs') {
+  const id = 'p_' + Date.now();
+  const label = type === 'nfs' ? 'New NFS Policy' : type === 'smb' ? 'New SMB Policy' : 'New Combined Policy';
+  const p = {
+    id,
+    name: label,
+    type,
+    nfs: { ...NFS_DEFAULTS, restrictions: JSON.parse(JSON.stringify(NFS_DEFAULTS.restrictions)) },
+    smb: { ...SMB_DEFAULTS }
+  };
+  policies.push(p);
+  save();
+  selectPolicy(id);
+  renderSidebar();
+}
+
+function selectPolicy(id) {
+  activePolicy = policies.find(p => p.id === id);
+  renderSidebar();
+  renderEditor();
+  // If the apply view is open, keep its dropdown in sync
+  const applyDropdown = document.getElementById('apply-policy-select');
+  if (applyDropdown && document.getElementById('view-apply').classList.contains('active')) {
+    applyDropdown.value = id;
+    updateCreateNewFields();
+    updateApplyPreview();
+    updateShareList();
+  }
+}
+
+function deletePolicy(id) {
+  if (!confirm('Delete this policy?')) return;
+  policies = policies.filter(p => p.id !== id);
+  activePolicy = null;
+  save();
+  renderSidebar();
+  renderEditor();
+}
+
+function clonePolicy(id) {
+  const src = policies.find(p => p.id === id);
+  const clone = JSON.parse(JSON.stringify(src));
+  clone.id = 'p_' + Date.now();
+  clone.name = src.name + ' (copy)';
+  policies.push(clone);
+  save();
+  selectPolicy(clone.id);
+  renderSidebar();
+}
+
+// ══════════════════════════════════════════════
+// Editor
+// ══════════════════════════════════════════════
+function renderEditor() {
+  const area = document.getElementById('editor-area');
+  if (!activePolicy) {
+    area.innerHTML = `<div class="empty-state"><div class="big">⚡</div><div style="font-size:15px;font-weight:600;color:var(--text2);margin-bottom:6px">No policy selected</div><div style="font-size:13px">Select a policy from the sidebar or create a new one.</div></div>`;
+    return;
+  }
+  const p = activePolicy;
+  area.innerHTML = `
+  <div class="editor-header">
+    <input class="form-input" id="policy-name" value="${esc(p.name)}" oninput="updatePolicyName(this.value)" style="font-size:17px;font-weight:600;background:transparent;border:1px solid transparent;padding:4px 8px;flex:1" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='transparent'">
+    <select class="form-input" id="policy-type" onchange="updatePolicyType(this.value)" style="width:auto">
+      <option value="nfs" ${p.type==='nfs'?'selected':''}>NFS Export</option>
+      <option value="smb" ${p.type==='smb'?'selected':''}>SMB Share</option>
+      <option value="both" ${p.type==='both'?'selected':''}>Both</option>
+    </select>
+    <button class="btn btn-sm" onclick="clonePolicy('${p.id}')">Duplicate</button>
+    <button class="btn btn-sm btn-danger" onclick="deletePolicy('${p.id}')">Delete</button>
+  </div>
+
+  <div class="tabs" id="proto-tabs">
+    ${p.type !== 'smb' ? `<div class="tab ${p.type==='nfs'?'active':''}" onclick="switchProtoTab('nfs',this)">NFS</div>` : ''}
+    ${p.type !== 'nfs' ? `<div class="tab ${p.type==='smb'?'active':''}" onclick="switchProtoTab('smb',this)">SMB</div>` : ''}
+  </div>
+
+  <div id="tab-nfs" class="tab-panel ${p.type !== 'smb' ? 'active' : ''}">${renderNFSEditor(p)}</div>
+  <div id="tab-smb" class="tab-panel ${p.type !== 'nfs' ? 'active' : ''}">${renderSMBEditor(p)}</div>
+  `;
+}
+
+function switchProtoTab(name, el) {
+  document.querySelectorAll('#proto-tabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+function updatePolicyName(v) {
+  if (!activePolicy) return;
+  activePolicy.name = v;
+  save();
+  renderSidebar();
+}
+function updatePolicyType(v) {
+  if (!activePolicy) return;
+  activePolicy.type = v;
+  save();
+  renderEditor();
+  renderSidebar();
+}
+
+// ── NFS Editor ──
+function renderNFSEditor(p) {
+  const n = p.nfs;
+  return `
+  <div class="card">
+    <div class="card-title">Export options (template — paths applied at deploy time)</div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" value="${esc(n.description)}" oninput="updateNFS('description',this.value)" placeholder="Optional description">
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${n.read_only?'checked':''} onchange="updateNFS('read_only',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Read only</div>
+    </div>
+    <div class="grid-2" style="margin-top:12px">
+      <div class="form-group">
+        <label class="form-label">Anonymous UID</label>
+        <input class="form-input" type="number" value="${n.anonymous_uid}" oninput="updateNFS('anonymous_uid',parseInt(this.value))" style="width:120px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Anonymous GID</label>
+        <input class="form-input" type="number" value="${n.anonymous_gid}" oninput="updateNFS('anonymous_gid',parseInt(this.value))" style="width:120px">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      Host restrictions / access rules
+      <button class="btn btn-sm" style="margin-left:auto" onclick="addNFSRestriction()">+ Add rule</button>
+    </div>
+    <div id="nfs-restrictions">${renderNFSRestrictions(n.restrictions)}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Preview (JSON)</div>
+    <pre id="nfs-preview" style="font-family:var(--font);font-size:11px;color:var(--text2);white-space:pre-wrap;overflow-x:auto">${esc(JSON.stringify(buildNFSPayload(p), null, 2))}</pre>
+  </div>
+  `;
+}
+
+function renderNFSRestrictions(restrictions) {
+  if (!restrictions.length) return '<div class="text-muted text-sm" style="padding:4px 0">No rules — all hosts allowed by default.</div>';
+  return restrictions.map((r, i) => `
+  <div class="card" style="margin-bottom:8px;background:var(--bg3)">
+    <div style="display:flex;align-items:center;margin-bottom:8px;gap:8px">
+      <span style="font-size:12px;font-weight:600;color:var(--text2)">Rule ${i+1}</span>
+      <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="removeNFSRestriction(${i})">Remove</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Host restrictions (CIDR or hostnames, one per line)</label>
+      <textarea class="form-input" oninput="updateNFSRestriction(${i},'host_restrictions',this.value.split('\\n').filter(x=>x.trim()))" placeholder="Leave empty for all hosts">${(r.host_restrictions||[]).join('\n')}</textarea>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${r.read_only?'checked':''} onchange="updateNFSRestriction(${i},'read_only',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Read only</div>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${r.require_privileged_port?'checked':''} onchange="updateNFSRestriction(${i},'require_privileged_port',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Require privileged port</div>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">User mapping</label>
+      <select class="form-input" onchange="updateNFSRestriction(${i},'user_mapping',this.value)">
+        <option value="NFS_MAP_NONE" ${r.user_mapping==='NFS_MAP_NONE'?'selected':''}>None</option>
+        <option value="NFS_MAP_ALL" ${r.user_mapping==='NFS_MAP_ALL'?'selected':''}>Map all</option>
+        <option value="NFS_MAP_ROOT" ${r.user_mapping==='NFS_MAP_ROOT'?'selected':''}>Map root only</option>
+      </select>
+    </div>
+    ${r.user_mapping !== 'NFS_MAP_NONE' ? `
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Map to UID</label>
+        <input class="form-input" value="${esc(r.map_to_user_id)}" oninput="updateNFSRestriction(${i},'map_to_user_id',this.value)" style="width:120px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Map to GID</label>
+        <input class="form-input" value="${esc(r.map_to_group_id)}" oninput="updateNFSRestriction(${i},'map_to_group_id',this.value)" style="width:120px">
+      </div>
+    </div>` : ''}
+  </div>`).join('');
+}
+
+function addNFSRestriction() {
+  if (!activePolicy) return;
+  activePolicy.nfs.restrictions.push({
+    host_restrictions: [], read_only: false, require_privileged_port: true,
+    user_mapping: 'NFS_MAP_NONE', map_to_user_id: '0', map_to_group_id: '0',
+    required_authentication_mode: 'AUTHENTICATION_MODE_NONE'
+  });
+  save();
+  document.getElementById('nfs-restrictions').innerHTML = renderNFSRestrictions(activePolicy.nfs.restrictions);
+}
+function removeNFSRestriction(i) {
+  activePolicy.nfs.restrictions.splice(i, 1);
+  save();
+  document.getElementById('nfs-restrictions').innerHTML = renderNFSRestrictions(activePolicy.nfs.restrictions);
+}
+function updateNFS(key, val) {
+  if (!activePolicy) return;
+  activePolicy.nfs[key] = val;
+  save();
+  refreshPreviews();
+}
+function updateNFSRestriction(i, key, val) {
+  if (!activePolicy) return;
+  activePolicy.nfs.restrictions[i][key] = val;
+  save();
+  refreshPreviews();
+}
+
+// ── SMB Editor ──
+function renderSMBEditor(p) {
+  const s = p.smb;
+  return `
+  <div class="card">
+    <div class="card-title">Share options (template — name and path applied at deploy time)</div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input class="form-input" value="${esc(s.description)}" oninput="updateSMB('description',this.value)" placeholder="Optional description">
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${s.read_only?'checked':''} onchange="updateSMB('read_only',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Read only</div>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${s.allow_guest_access?'checked':''} onchange="updateSMB('allow_guest_access',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Guest access</div>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${s.require_encryption?'checked':''} onchange="updateSMB('require_encryption',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Require encryption</div>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${s.hide_previous_versions?'checked':''} onchange="updateSMB('hide_previous_versions',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Hide previous versions</div>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" ${s.directory_oplock_enabled?'checked':''} onchange="updateSMB('directory_oplock_enabled',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Directory oplocks</div>
+    </div>
+    <div class="grid-2" style="margin-top:12px">
+      <div class="form-group">
+        <label class="form-label">Default dir create mode</label>
+        <input class="form-input" value="${esc(s.default_dir_create_mode)}" oninput="updateSMB('default_dir_create_mode',this.value)" placeholder="0755">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Default file create mode</label>
+        <input class="form-input" value="${esc(s.default_file_create_mode)}" oninput="updateSMB('default_file_create_mode',this.value)" placeholder="0644">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      Network permissions
+      <button class="btn btn-sm" style="margin-left:auto" onclick="addSMBPermission()">+ Add</button>
+    </div>
+    <div id="smb-permissions">${renderSMBPermissions(s.network_permissions)}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Preview (JSON)</div>
+    <pre id="smb-preview" style="font-family:var(--font);font-size:11px;color:var(--text2);white-space:pre-wrap;overflow-x:auto">${esc(JSON.stringify(buildSMBPayload(p), null, 2))}</pre>
+  </div>
+  `;
+}
+
+const SMB_RIGHTS = ['SMB_RIGHT_READ','SMB_RIGHT_WRITE','SMB_RIGHT_CHANGE_PERMISSIONS','SMB_RIGHT_DELETE','SMB_RIGHT_FULL_CONTROL'];
+function renderSMBPermissions(perms) {
+  return perms.map((perm, i) => `
+  <div class="card" style="margin-bottom:8px;background:var(--bg3)">
+    <div style="display:flex;align-items:center;margin-bottom:8px;gap:8px">
+      <span style="font-size:12px;font-weight:600;color:var(--text2)">Permission ${i+1}</span>
+      <select class="form-input" style="width:auto" onchange="updateSMBPerm(${i},'type',this.value)">
+        <option value="ALLOWED" ${perm.type==='ALLOWED'?'selected':''}>Allowed</option>
+        <option value="DENIED" ${perm.type==='DENIED'?'selected':''}>Denied</option>
+      </select>
+      <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="removeSMBPermission(${i})">Remove</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address ranges (CIDR, one per line — empty = all)</label>
+      <textarea class="form-input" oninput="updateSMBPerm(${i},'address_ranges',this.value.split('\\n').filter(x=>x.trim()))" placeholder="Leave empty for all">${(perm.address_ranges||[]).join('\n')}</textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Rights</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${SMB_RIGHTS.map(r => `
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+          <input type="checkbox" ${(perm.rights||[]).includes(r)?'checked':''}
+            onchange="toggleSMBRight(${i},'${r}',this.checked)" style="cursor:pointer">
+          ${r.replace('SMB_RIGHT_','').toLowerCase()}
+        </label>`).join('')}
+      </div>
+    </div>
+  </div>`).join('') || '<div class="text-muted text-sm" style="padding:4px 0">No permissions defined.</div>';
+}
+
+function addSMBPermission() {
+  if (!activePolicy) return;
+  activePolicy.smb.network_permissions.push({ type:'ALLOWED', address_ranges:[], rights:['SMB_RIGHT_READ','SMB_RIGHT_WRITE'] });
+  save();
+  document.getElementById('smb-permissions').innerHTML = renderSMBPermissions(activePolicy.smb.network_permissions);
+}
+function removeSMBPermission(i) {
+  activePolicy.smb.network_permissions.splice(i, 1);
+  save();
+  document.getElementById('smb-permissions').innerHTML = renderSMBPermissions(activePolicy.smb.network_permissions);
+}
+function updateSMB(key, val) {
+  if (!activePolicy) return;
+  activePolicy.smb[key] = val;
+  save();
+  refreshPreviews();
+}
+function updateSMBPerm(i, key, val) {
+  activePolicy.smb.network_permissions[i][key] = val;
+  save();
+  refreshPreviews();
+}
+function toggleSMBRight(i, right, checked) {
+  const rights = activePolicy.smb.network_permissions[i].rights || [];
+  if (checked && !rights.includes(right)) rights.push(right);
+  if (!checked) { const idx = rights.indexOf(right); if (idx>-1) rights.splice(idx,1); }
+  activePolicy.smb.network_permissions[i].rights = rights;
+  save();
+  refreshPreviews();
+}
+
+// ── Payload builders ──
+function buildNFSPayload(p) {
+  const n = p.nfs;
+  return {
+    description: n.description,
+    read_only: n.read_only,
+    anonymous_uid: n.anonymous_uid,
+    anonymous_gid: n.anonymous_gid,
+    restrictions: (n.restrictions || []).map(r => ({
+      host_restrictions:            r.host_restrictions || [],
+      read_only:                    r.read_only,
+      require_privileged_port:      r.require_privileged_port,
+      required_authentication_mode: 'AUTHENTICATION_MODE_NONE',
+      user_mapping:                 r.user_mapping,
+      map_to_user:  { id_type: 'NFS_UID', id_value: String(r.map_to_user_id  || '0') },
+      map_to_group: { id_type: 'NFS_GID', id_value: String(r.map_to_group_id || '0') },
+    }))
+  };
+}
+function buildSMBPayload(p) {
+  const s = p.smb;
+  return {
+    description: s.description,
+    read_only: s.read_only,
+    allow_guest_access: s.allow_guest_access,
+    require_encryption: s.require_encryption,
+    hide_previous_versions: s.hide_previous_versions,
+    directory_oplock_enabled: s.directory_oplock_enabled,
+    bytes_per_sector: s.bytes_per_sector,
+    default_dir_create_mode: s.default_dir_create_mode,
+    default_file_create_mode: s.default_file_create_mode,
+    network_permissions: s.network_permissions
+  };
+}
+
+// ── Live preview refresh ──
+function refreshPreviews() {
+  if (!activePolicy) return;
+  const nfsPre = document.getElementById('nfs-preview');
+  const smbPre = document.getElementById('smb-preview');
+  if (nfsPre) nfsPre.textContent = JSON.stringify(buildNFSPayload(activePolicy), null, 2);
+  if (smbPre) smbPre.textContent = JSON.stringify(buildSMBPayload(activePolicy), null, 2);
+}
+
+// ══════════════════════════════════════════════
+// Cluster connection
+// ══════════════════════════════════════════════
+function openClusterModal() {
+  if (cluster) {
+    document.getElementById('m-host').value = cluster.host;
+    document.getElementById('m-port').value = cluster.port;
+    document.getElementById('m-user').value = cluster.user;
+    document.getElementById('m-pass').value = '';
+    document.getElementById('m-insecure').checked = cluster.insecure;
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModalDirect();
+}
+function closeModalDirect() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+document.getElementById('m-insecure').addEventListener('change', function() {
+  document.getElementById('insecure-note').style.display = this.checked ? 'block' : 'none';
+});
+
+async function connectCluster() {
+  const host = document.getElementById('m-host').value.trim();
+  const port = parseInt(document.getElementById('m-port').value) || 8000;
+  const user = document.getElementById('m-user').value.trim();
+  const pass = document.getElementById('m-pass').value;
+  const insecure = document.getElementById('m-insecure').checked;
+
+  if (!host || !user || !pass) { toast('Fill in all connection fields.', 'err'); return; }
+
+  setConnStatus('busy', 'Connecting…');
+  log('info', `Connecting to ${host}:${port} as ${user} (${insecure ? 'insecure proxy' : 'direct TLS'})`);
+
+  try {
+    const baseUrl = `https://${host}:${port}`;
+    const loginRes = await qumuloFetch(baseUrl, '/v1/session/login', 'POST', { username: user, password: pass }, insecure, null);
+    const token = loginRes.bearer_token;
+    cluster = { host, port, user, insecure, token, baseUrl };
+    Object.keys(versionCache).forEach(k => delete versionCache[k]);
+    Object.keys(fsBrowseCache).forEach(k => delete fsBrowseCache[k]);
+    save();
+    setConnStatus('ok', `${host}`);
+    log('ok', `Authenticated. Token acquired.`);
+    closeModalDirect();
+    toast(`Connected to ${host}`, 'ok');
+    fetchShareLists();
+  } catch(e) {
+    setConnStatus('err', 'Failed');
+    log('err', `Connection failed: ${e.message}`);
+    toast(`Connection failed: ${e.message}`, 'err');
+  }
+}
+
+function setConnStatus(state, label) {
+  const dot = document.getElementById('conn-dot');
+  const lbl = document.getElementById('conn-label');
+  dot.className = '';
+  if (state === 'ok') dot.classList.add('ok');
+  else if (state === 'err') dot.classList.add('err');
+  else if (state === 'busy') dot.classList.add('busy');
+  lbl.textContent = label;
+}
+
+// ── CORS proxy aware fetch ──
+async function qumuloFetch(baseUrl, path, method, body, insecure, token) {
+  const fullUrl = baseUrl + path;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  const opts = {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined
+  };
+
+  let targetUrl = fullUrl;
+  // For insecure (self-signed) clusters route through the local nginx /proxy/ location
+  if (insecure) {
+    targetUrl = '/proxy/' + fullUrl;
+  }
+
+  const res = await fetch(targetUrl, opts);
+  if (!res.ok) {
+    let errText = '';
+    try { const j = await res.json(); errText = j.description || j.error_class || JSON.stringify(j); } catch { errText = await res.text(); }
+    throw new Error(`HTTP ${res.status}: ${errText}`);
+  }
+  return res.json();
+}
+
+function clusterFetch(path, method = 'GET', body = null) {
+  if (!cluster) throw new Error('Not connected');
+  return qumuloFetch(cluster.baseUrl, path, method, body, cluster.insecure, cluster.token);
+}
+
+// Try API versions v3 → v2 → v1 in order, cache the working version per endpoint prefix.
+// versionCache keys are endpoint prefixes like 'nfs/exports' or 'smb/shares'.
+const versionCache = {};
+async function versionedFetch(endpointSuffix, method = 'GET', body = null) {
+  if (!cluster) throw new Error('Not connected');
+  const cacheKey = endpointSuffix.split('?')[0].split('/').slice(0, 2).join('/');
+  // If we already know which version works, use it directly
+  if (versionCache[cacheKey]) {
+    const path = '/' + versionCache[cacheKey] + '/' + endpointSuffix;
+    log('info', `${method} ${path} (cached v${versionCache[cacheKey]})`);
+    return clusterFetch(path, method, body);
+  }
+  // Probe v3 → v2 → v1
+  const versions = ['v3', 'v2', 'v1'];
+  let lastErr;
+  for (const v of versions) {
+    const path = '/' + v + '/' + endpointSuffix;
+    try {
+      log('info', `${method} ${path} (probing ${v})`);
+      const result = await clusterFetch(path, method, body);
+      versionCache[cacheKey] = v;
+      log('ok', `API version ${v} accepted for ${cacheKey}`);
+      return result;
+    } catch(e) {
+      log('warn', `${v} failed for ${endpointSuffix}: ${e.message}`);
+      lastErr = e;
+    }
+  }
+  throw new Error(`All API versions failed for ${endpointSuffix}: ${lastErr?.message}`);
+}
+
+// ══════════════════════════════════════════════
+// Share/Export lists
+// ══════════════════════════════════════════════
+async function fetchShareLists() {
+  if (!cluster) return;
+  // Fetch NFS and SMB independently so one failing doesn't block the other
+  try {
+    const nfsRes = await versionedFetch('nfs/exports/');
+    clusterShares.nfs = nfsRes.entries || nfsRes || [];
+    log('ok', `Fetched ${clusterShares.nfs.length} NFS exports`);
+
+  } catch(e) {
+    log('err', `NFS export fetch failed: ${e.message}`);
+    clusterShares.nfs = [];
+  }
+  try {
+    const smbRes = await versionedFetch('smb/shares/');
+    clusterShares.smb = smbRes.entries || smbRes || [];
+    log('ok', `Fetched ${clusterShares.smb.length} SMB shares`);
+  } catch(e) {
+    log('err', `SMB share fetch failed: ${e.message}`);
+    clusterShares.smb = [];
+  }
+  updateShareList();
+}
+
+// ══════════════════════════════════════════════
+// Apply view
+// ══════════════════════════════════════════════
+function refreshApplyView() {
+  const sel = document.getElementById('apply-policy-select');
+  // Default to the policy currently selected in the editor, fall back to first
+  const targetId = activePolicy?.id || (policies.length ? policies[0].id : '');
+  sel.innerHTML = policies.map(p => `<option value="${p.id}" ${p.id===targetId?'selected':''}>${p.name} (${p.type.toUpperCase()})</option>`).join('');
+  if (targetId) sel.value = targetId;
+  const action = document.getElementById('apply-action')?.value;
+  document.getElementById('create-new-fields').style.display = action === 'create-new' ? 'block' : 'none';
+  document.getElementById('existing-fields').style.display = action === 'apply-existing' ? 'block' : 'none';
+  updateCreateNewFields();
+  updateApplyPreview();
+  updateShareList();
+}
+
+document.addEventListener('change', function(e) {
+  if (e.target.id === 'apply-policy-select') {
+    // Sync sidebar selection to match dropdown
+    const id = e.target.value;
+    activePolicy = policies.find(p => p.id === id) || activePolicy;
+    renderSidebar();    // highlights the matching policy in the sidebar
+  }
+  if (e.target.id === 'apply-policy-select' || e.target.id === 'apply-action') {
+    const action = document.getElementById('apply-action').value;
+    document.getElementById('create-new-fields').style.display = action === 'create-new' ? 'block' : 'none';
+    document.getElementById('existing-fields').style.display = action === 'apply-existing' ? 'block' : 'none';
+    updateCreateNewFields();
+    updateApplyPreview();
+    updateShareList();
+  }
+});
+
+// Render create-new name/path fields adapted to the selected policy type
+function browseBtn(targetId) {
+  return `<button type="button" class="btn btn-sm" style="margin-left:6px;padding:3px 8px;font-size:11px" onclick="toggleBrowser('${targetId}')" title="Browse cluster filesystem">Browse…</button>`;
+}
+
+function updateCreateNewFields() {
+  const container = document.getElementById('create-new-dynamic');
+  if (!container) return;
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol = policies.find(p => p.id === polId);
+  const type = pol ? pol.type : 'nfs';
+  const canBrowse = !!cluster;
+  const bb = canBrowse ? browseBtn('new-fs-path') : '';
+
+  if (type === 'both') {
+    container.innerHTML = `
+      <div class="notice info" style="margin-bottom:10px">Both NFS export and SMB share will be created using the same name and path.</div>
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
+        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects">
+        <div id="browser-new-fs-path"></div>
+        <div id="queue-new-fs-path"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Export / Share name</label>
+        <input class="form-input" id="new-share-name" placeholder="e.g. projects">
+      </div>`;
+  } else if (type === 'smb') {
+    container.innerHTML = `
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
+        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects">
+        <div id="browser-new-fs-path"></div>
+        <div id="queue-new-fs-path"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Share name</label>
+        <input class="form-input" id="new-share-name" placeholder="e.g. projects">
+      </div>`;
+  } else {
+    // NFS: fs path first, export path second
+    container.innerHTML = `
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
+        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects, /data/archive">
+        <div id="browser-new-fs-path"></div>
+        <div id="queue-new-fs-path"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Export path</label>
+        <input class="form-input" id="new-share-name" placeholder="e.g. /exports/projects">
+      </div>`;
+  }
+  // Re-wire preview update on input — including fs-path for comma-parse
+  container.querySelectorAll('input').forEach(el => {
+    el.addEventListener('input', () => { if (el.id === 'new-fs-path') { syncExportPathField(); updateApplyPreview(); } else { syncFsPathField(); syncExportPathField(); updateApplyPreview(); } });
+  });
+  const fsField = container.querySelector('#new-fs-path');
+  if (fsField) fsField.addEventListener('blur', parseFsPathField);
+  syncFsPathField();
+  syncExportPathField();
+}
+
+// ── Filesystem browse helper ──
+// Uses GET /v1/files/{ref}/entries/ where {ref} is the URL-encoded path.
+// Falls back through v3→v2→v1 of that endpoint, then tries legacy ls variants.
+const fsBrowseCache = {};
+
+async function fsBrowse(cwdPath) {
+  if (!cluster) throw new Error('Not connected');
+  // Encode the path for use as a URL segment: /data/projects -> %2Fdata%2Fprojects
+  const ref = encodeURIComponent(cwdPath);
+  if (fsBrowseCache.tpl) {
+    return clusterFetch(fsBrowseCache.tpl.replace('__REF__', ref));
+  }
+  const candidates = [
+    '/v3/files/__REF__/entries/?limit=1000',
+    '/v2/files/__REF__/entries/?limit=1000',
+    '/v1/files/__REF__/entries/?limit=1000',
+    '/v3/fs/ls-lite?path=__REF__&limit=1000',
+    '/v2/fs/ls-lite?path=__REF__&limit=1000',
+    '/v1/fs/ls-lite?path=__REF__&limit=1000',
+    '/v1/fs/ls?path=__REF__&limit=1000',
+  ];
+  let lastErr;
+  for (const tpl of candidates) {
+    const url = tpl.replace('__REF__', ref);
+    try {
+      log('info', `GET ${url} (fs browse probe)`);
+      const res = await clusterFetch(url);
+      fsBrowseCache.tpl = tpl;
+      log('ok', `FS browse endpoint: ${tpl.replace('__REF__', '<path>')}`);
+      return res;
+    } catch(e) {
+      log('warn', `  ✗ ${url}: ${e.message}`);
+      lastErr = e;
+    }
+  }
+  throw new Error(`No working FS browse endpoint found. Last error: ${lastErr?.message}`);
+}
+
+// Normalize entries — /files/{ref}/entries returns { files: [{name, type, ...}] }
+// type values: "FS_FILE", "FS_DIRECTORY", "FS_SYMLINK" etc.
+function normalizeFsEntries(res) {
+  const raw = res.files || res.entries || (Array.isArray(res) ? res : []);
+  return raw.map(e => ({
+    name: e.name || e.file_name || '',
+    isDir: /DIRECTORY/i.test(e.type || e.file_type || ''),
+  })).filter(e => e.name && e.name !== '.' && e.name !== '..');
+}
+
+// ── Path browser ──
+const browserState = {}; // keyed by targetInputId: { cwd, open, selected: Set }
+const pathQueues   = {}; // keyed by targetInputId: [ { fsPath, name } ]
+
+function toggleBrowser(targetId) {
+  if (!cluster) { toast('Connect to a cluster first.', 'err'); return; }
+  if (!browserState[targetId]) browserState[targetId] = { cwd: '/', open: false, selected: new Set() };
+  if (!pathQueues[targetId]) pathQueues[targetId] = [];
+  browserState[targetId].open = !browserState[targetId].open;
+  if (browserState[targetId].open) {
+    const input = document.getElementById(targetId);
+    const cur = input?.value?.trim();
+    if (cur && cur.startsWith('/')) browserState[targetId].cwd = cur;
+    renderBrowser(targetId);
+  } else {
+    const el = document.getElementById('browser-' + targetId);
+    if (el) el.innerHTML = '';
+  }
+}
+
+async function renderBrowser(targetId) {
+  const el = document.getElementById('browser-' + targetId);
+  if (!el) return;
+  const state = browserState[targetId];
+  el.innerHTML = `<div class="path-browser"><div class="path-loading pb-loading">Loading ${state.cwd}…</div></div>`;
+
+  try {
+    const res = await fsBrowse(state.cwd);
+    const all = normalizeFsEntries(res);
+    const dirs = all.filter(e => e.isDir).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const cwd = state.cwd;
+    const parent = cwd === '/' ? null : cwd.replace(/\/[^\/]+$/, '') || '/';
+
+    const sel = browserState[targetId].selected;
+    el.innerHTML = `
+    <div class="path-browser">
+      <div class="path-browser-bar">
+        <span class="pb-cwd">${esc(cwd)}</span>
+        <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="addBrowserCwd('${targetId}')">+ Add this dir</button>
+        <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="addBrowserSelected('${targetId}')">+ Add checked</button>
+        <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="toggleBrowser('${targetId}')">Close</button>
+      </div>
+      <div class="path-browser-list">
+        ${parent !== null ? `<div class="pb-entry pb-up pb-dir" onclick="browseDir('${targetId}','${esc(parent)}')"><span class="pb-icon">↑</span><span>..</span></div>` : ''}
+        ${dirs.length === 0 ? '<div class="pb-loading">No subdirectories</div>' : ''}
+        ${dirs.map(d => {
+          const name = d.name;
+          const fullPath = (cwd === '/' ? '' : cwd) + '/' + name;
+          const checked = sel.has(fullPath) ? 'checked' : '';
+          const selCls  = sel.has(fullPath) ? ' pb-selected' : '';
+          return `<div class="pb-entry pb-dir${selCls}">
+            <input type="checkbox" class="pb-checkbox" ${checked} onchange="toggleBrowserCheck('${targetId}','${esc(fullPath)}',this.checked)" onclick="event.stopPropagation()">
+            <span class="pb-icon" onclick="browseDir('${targetId}','${esc(fullPath)}')">📁</span>
+            <span style="flex:1" onclick="browseDir('${targetId}','${esc(fullPath)}')">${esc(name)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="path-browser"><div class="pb-loading" style="color:var(--danger)">Browse failed: ${esc(e.message)}</div></div>`;
+    log('err', `Path browse failed at ${browserState[targetId]?.cwd}: ${e.message}`);
+  }
+}
+
+function browseDir(targetId, path) {
+  if (!browserState[targetId]) browserState[targetId] = { open: true };
+  browserState[targetId].cwd = path;
+  renderBrowser(targetId);
+}
+
+function toggleBrowserCheck(targetId, path, checked) {
+  if (!browserState[targetId]) return;
+  if (checked) {
+    browserState[targetId].selected.add(path);
+  } else {
+    browserState[targetId].selected.delete(path);
+    // Also remove from the committed queue if it was already added there
+    if (pathQueues[targetId]) {
+      pathQueues[targetId] = pathQueues[targetId].filter(e => e.fsPath !== path);
+    }
+    renderPathQueue(targetId);
+  }
+  syncFsPathField();
+  syncExportPathField();
+  updateApplyPreview();
+}
+
+function addBrowserCwd(targetId) {
+  const cwd = browserState[targetId]?.cwd;
+  if (!cwd) return;
+  addToPathQueue(targetId, cwd);
+}
+
+function addBrowserSelected(targetId) {
+  const sel = browserState[targetId]?.selected;
+  if (!sel || sel.size === 0) { toast('Check at least one directory first.', 'warn'); return; }
+  // Batch all mutations silently, then render + preview once
+  sel.forEach(path => _enqueuePath(targetId, path));
+  sel.clear();
+  renderPathQueue(targetId);
+  syncFsPathField();
+  updateApplyPreview();
+  renderBrowser(targetId); // redraw browser with checkboxes cleared
+}
+
+// Internal: mutate the queue without triggering renders
+function _enqueuePath(targetId, fsPath) {
+  if (!pathQueues[targetId]) pathQueues[targetId] = [];
+  if (pathQueues[targetId].find(e => e.fsPath === fsPath)) return; // no duplicates
+  const defaultName = fsPath.split('/').filter(Boolean).pop() || fsPath;
+  pathQueues[targetId].push({ fsPath, name: defaultName });
+}
+
+// Public: add a single path and update UI immediately
+function addToPathQueue(targetId, fsPath) {
+  _enqueuePath(targetId, fsPath);
+  renderPathQueue(targetId);
+  updateApplyPreview();
+}
+
+function removeFromPathQueue(targetId, fsPath) {
+  if (!pathQueues[targetId]) return;
+  pathQueues[targetId] = pathQueues[targetId].filter(e => e.fsPath !== fsPath);
+  renderPathQueue(targetId);
+  updateApplyPreview();
+}
+
+function updateQueueName(targetId, fsPath, val) {
+  const entry = pathQueues[targetId]?.find(e => e.fsPath === fsPath);
+  if (entry) { entry.name = val; updateApplyPreview(); }
+}
+
+// Sync the fs path input with the current queue + pending selections.
+// Also parses a manually typed comma-separated list back into the queue.
+function syncFsPathField() {
+  const field = document.getElementById('new-fs-path');
+  if (!field || field === document.activeElement) return; // don't overwrite while typing
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const allPaths = [...committed.map(e => e.fsPath), ...pending];
+  // Always write — including empty string to clear when everything is removed
+  field.value = allPaths.join(', ');
+}
+
+// Parse the fs path field on blur — reconcile the queue to match exactly what is in the field.
+// Paths removed from the field are removed from the queue; new ones are added.
+function parseFsPathField() {
+  const field = document.getElementById('new-fs-path');
+  if (!field) return;
+  const raw = field.value;
+  const paths = raw.split(',').map(s => s.trim()).filter(s => s.startsWith('/'));
+
+  if (!pathQueues['new-fs-path']) pathQueues['new-fs-path'] = [];
+
+  // Remove queue entries whose path is no longer in the field
+  pathQueues['new-fs-path'] = pathQueues['new-fs-path'].filter(e => paths.includes(e.fsPath));
+
+  // Also clear pending selections that were removed
+  const sel = browserState['new-fs-path']?.selected;
+  if (sel) sel.forEach(p => { if (!paths.includes(p)) sel.delete(p); });
+
+  // Add any new paths from the field not yet in the queue
+  paths.forEach(p => _enqueuePath('new-fs-path', p));
+
+  renderPathQueue('new-fs-path');
+  syncFsPathField();
+  syncExportPathField();
+  updateApplyPreview();
+  // If the browser is open, re-render it so checkboxes reflect the updated selection
+  if (browserState['new-fs-path']?.open) renderBrowser('new-fs-path');
+}
+
+// When multiple NFS paths are queued the export path field is disabled,
+// so use fsPath as the export_path. With a single entry, use the editable name.
+function nfsExportPath(entry, queueSize) {
+  return queueSize > 1 ? entry.fsPath : (entry.name || entry.fsPath);
+}
+
+// Sync the export path field for NFS: grey out + clear when multiple paths are queued/checked,
+// re-enable and pre-fill when exactly one path is present.
+function syncExportPathField() {
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol   = policies.find(p => p.id === polId);
+  if (!pol || pol.type !== 'nfs') return; // only applies to NFS
+  const field = document.getElementById('new-share-name');
+  if (!field) return;
+
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const total = committed.length + pending.length;
+
+  if (total > 1) {
+    field.value = '';
+    field.disabled = true;
+    field.style.opacity = '0.35';
+    field.placeholder = 'Not used — multiple paths selected';
+  } else {
+    field.disabled = false;
+    field.style.opacity = '';
+    field.placeholder = 'e.g. /exports/projects';
+    // If exactly one path, pre-fill with its name if the field is blank
+    if (total === 1) {
+      const only = committed[0] || { name: pending[0]?.split('/').filter(Boolean).pop() || '' };
+      if (!field.value) field.value = only.name || '';
+    }
+  }
+}
+
+function renderPathQueue(targetId) {
+  const queueEl = document.getElementById('queue-' + targetId);
+  if (!queueEl) return;
+  const queue = pathQueues[targetId] || [];
+  if (!queue.length) { queueEl.innerHTML = ''; syncExportPathField(); return; }
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol = policies.find(p => p.id === polId);
+  const type = pol ? pol.type : 'nfs';
+  const nameLabel = type === 'smb' ? 'Share name' : type === 'both' ? 'Export/Share name' : 'Export path';
+  queueEl.innerHTML = `
+    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px">${queue.length} path${queue.length>1?'s':''} queued</div>
+    <div class="pb-queue">
+      ${queue.map(e => `
+      <div class="pb-queue-entry">
+        <div class="pb-queue-path" title="${esc(e.fsPath)}">${esc(e.fsPath)}</div>
+        <input class="form-input" value="${esc(e.name)}" placeholder="${esc(nameLabel)}"
+          oninput="updateQueueName('${targetId}','${esc(e.fsPath)}',this.value)" style="font-size:12px;padding:4px 7px">
+        <div class="pb-queue-actions">
+          <button type="button" class="btn-remove" onclick="removeFromPathQueue('${targetId}','${esc(e.fsPath)}')" title="Remove">×</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  syncExportPathField();
+}
+
+// Legacy single-path select (kept for typing directly into the input)
+function selectBrowserPath(targetId, path) {
+  addToPathQueue(targetId, path);
+}
+
+// Full unfiltered item list for the current policy type
+let allShareItems = [];
+
+function updateShareList() {
+  const pol = policies.find(p => p.id === document.getElementById('apply-policy-select')?.value);
+  const proto = pol ? pol.type : 'both';
+  const label = proto === 'nfs' ? 'NFS export' : proto === 'smb' ? 'SMB share' : 'share/export';
+  const el = document.getElementById('target-proto-label');
+  if (el) el.textContent = label;
+
+  const sel = document.getElementById('share-select');
+  const filterEl = document.getElementById('share-filter');
+  if (!sel) return;
+
+  if (!cluster) {
+    sel.innerHTML = '<option disabled value="">— connect to cluster to load —</option>';
+    return;
+  }
+
+  allShareItems = [];
+  if (proto === 'nfs' || proto === 'both') allShareItems.push(...clusterShares.nfs.map(s => ({...s, _proto:'nfs'})));
+  if (proto === 'smb' || proto === 'both') allShareItems.push(...clusterShares.smb.map(s => ({...s, _proto:'smb'})));
+
+  if (filterEl) filterEl.value = '';
+  renderShareSelect('');
+}
+
+function filterShares() {
+  const q = (document.getElementById('share-filter')?.value || '').toLowerCase();
+  renderShareSelect(q);
+}
+
+function renderShareSelect(q) {
+  const sel = document.getElementById('share-select');
+  const countEl = document.getElementById('share-count');
+  if (!sel) return;
+
+  const filtered = q
+    ? allShareItems.filter(s => {
+        const name = (s.export_path || s.share_name || s.id || '').toLowerCase();
+        const path = (s.fs_path || '').toLowerCase();
+        return name.includes(q) || path.includes(q);
+      })
+    : allShareItems;
+
+  if (countEl) {
+    countEl.textContent = allShareItems.length
+      ? `(${filtered.length} of ${allShareItems.length})`
+      : '';
+  }
+
+  if (!filtered.length) {
+    sel.innerHTML = allShareItems.length
+      ? '<option disabled value="">— no matches —</option>'
+      : '<option disabled value="">— no shares/exports found —</option>';
+    return;
+  }
+
+  sel.innerHTML = filtered.map(s => {
+    const name = s.export_path || s.share_name || s.id;
+    const proto = s._proto.toUpperCase();
+    const path = s.fs_path ? `  (${s.fs_path})` : '';
+    const selected = selectedShares.some(x => x.id === s.id) ? 'selected' : '';
+    return `<option value="${s.id}" data-proto="${s._proto}" data-name="${name}" ${selected}>[${proto}] ${name}${path}</option>`;
+  }).join('');
+
+  // Re-select previously selected shares if still present
+  selectedShares.forEach(s => {
+    const opt = sel.querySelector(`option[value="${s.id}"]`);
+    if (opt) opt.selected = true;
+  });
+}
+
+function selectShareFromDropdown(selectEl) {
+  selectedShares = Array.from(selectEl.selectedOptions)
+    .filter(o => o.value)
+    .map(o => ({ id: o.value, proto: o.dataset.proto, name: o.dataset.name }));
+  updateApplyPreview();
+}
+
+function updateApplyPreview() {
+  const prev = document.getElementById('dry-run-preview');
+  if (!prev) return;
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol = policies.find(p => p.id === polId);
+  if (!pol) { prev.textContent = 'Select a policy to preview.'; return; }
+  const action = document.getElementById('apply-action')?.value;
+
+  if (action === 'create-new') {
+    const apc    = document.getElementById('new-allow-path-create')?.checked ?? true;
+    const nfsVer = versionCache['nfs/exports'] || 'v3→v2→v1';
+    const smbVer = versionCache['smb/shares']  || 'v3→v2→v1';
+    // Merge committed queue + any currently checked (but not yet added) paths
+    // Build queue from the field (source of truth for live edits) + committed names
+    const committed   = pathQueues['new-fs-path'] || [];
+    const pendingSel  = browserState['new-fs-path']?.selected ? [...browserState['new-fs-path'].selected] : [];
+    const fieldPaths  = (document.getElementById('new-fs-path')?.value || '')
+      .split(',').map(s => s.trim()).filter(s => s.startsWith('/'));
+    // Union: field paths + pending selections not yet in field
+    const allPaths = [...new Set([...fieldPaths, ...pendingSel])];
+    const queue = allPaths.length
+      ? allPaths.map(p => {
+          const existing = committed.find(e => e.fsPath === p);
+          return existing || { fsPath: p, name: p.split('/').filter(Boolean).pop() || p };
+        })
+      : [{ fsPath: '<fs_path>', name: '<n>' }];
+    const calls = queue.flatMap(entry => {
+      const out = [];
+      if (pol.type === 'nfs' || pol.type === 'both')
+        out.push({ _endpoint: `POST /${nfsVer}/nfs/exports/`, body: { ...buildNFSPayload(pol), export_path: nfsExportPath(entry, queue.length), fs_path: entry.fsPath, allow_fs_path_create: apc } });
+      if (pol.type === 'smb' || pol.type === 'both')
+        out.push({ _endpoint: `POST /${smbVer}/smb/shares/`, body: { ...buildSMBPayload(pol), share_name: entry.name, fs_path: entry.fsPath, allow_fs_path_create: apc } });
+      return out;
+    });
+    prev.textContent = JSON.stringify(calls.length === 1 ? calls[0] : calls, null, 2);
+  } else {
+    if (!selectedShares.length) { prev.textContent = 'Select one or more targets.'; return; }
+    const apc = document.getElementById('existing-allow-path-create')?.checked ?? true;
+    const calls = selectedShares.map(s => {
+      const ver = s.proto === 'nfs'
+        ? (versionCache['nfs/exports'] || 'v3\u2192v2\u2192v1')
+        : (versionCache['smb/shares']  || 'v3\u2192v2\u2192v1');
+      const body = s.proto === 'nfs'
+        ? { ...buildNFSPayload(pol), allow_fs_path_create: apc }
+        : { ...buildSMBPayload(pol), allow_fs_path_create: apc };
+      const endpoint = s.proto === 'nfs'
+        ? `PATCH /${ver}/nfs/exports/${s.id}`
+        : `PATCH /${ver}/smb/shares/${s.id}`;
+      return { _endpoint: endpoint, _target: s.name, body };
+    });
+    prev.textContent = JSON.stringify(calls.length === 1 ? calls[0] : calls, null, 2);
+  }
+}
+
+async function applyPolicy() {
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol = policies.find(p => p.id === polId);
+  if (!pol) { toast('Select a policy.', 'err'); return; }
+  if (!cluster) { toast('Connect to a cluster first.', 'err'); return; }
+
+  const action = document.getElementById('apply-action').value;
+
+  try {
+    if (action === 'create-new') {
+      const allowPathCreate = document.getElementById('new-allow-path-create').checked;
+      // Build list of {fsPath, name} entries — from queue if populated, else from manual inputs
+      const queue = pathQueues['new-fs-path']?.length
+        ? pathQueues['new-fs-path']
+        : (document.getElementById('new-fs-path')?.value || '')
+            .split(',').map(s => s.trim()).filter(s => s.startsWith('/'))
+            .map(p => ({ fsPath: p, name: document.getElementById('new-share-name')?.value.trim() || p.split('/').filter(Boolean).pop() || p }));
+      if (!queue.length || !queue[0].fsPath || !queue[0].name) {
+        toast('Enter a name and path, or use Browse to queue paths.', 'err'); return;
+      }
+      let successCount = 0;
+      for (const entry of queue) {
+        try {
+          if (pol.type === 'nfs' || pol.type === 'both') {
+            const payload = { ...buildNFSPayload(pol), export_path: nfsExportPath(entry, queue.length), fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
+            await versionedFetch('nfs/exports/', 'POST', payload);
+            log('ok', `Created NFS export "${entry.name}" → ${entry.fsPath}`);
+          }
+          if (pol.type === 'smb' || pol.type === 'both') {
+            const payload = { ...buildSMBPayload(pol), share_name: entry.name, fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
+            await versionedFetch('smb/shares/', 'POST', payload);
+            log('ok', `Created SMB share "${entry.name}" → ${entry.fsPath}`);
+          }
+          successCount++;
+        } catch(e) {
+          log('err', `Failed to create "${entry.name}": ${e.message}`);
+          toast(`Failed on "${entry.name}": ${e.message}`, 'err');
+        }
+      }
+      if (successCount > 0) {
+        toast(`Created ${successCount} share/export${successCount > 1 ? 's' : ''} successfully!`, 'ok');
+        pathQueues['new-fs-path'] = [];
+        renderPathQueue('new-fs-path');
+      }
+      fetchShareLists();
+
+    } else {
+      if (!selectedShares.length) { toast('Select at least one target.', 'err'); return; }
+      const allowPathCreate = document.getElementById('existing-allow-path-create').checked;
+      let successCount = 0;
+      for (const target of selectedShares) {
+        try {
+          const payload = target.proto === 'nfs'
+            ? { ...buildNFSPayload(pol), allow_fs_path_create: allowPathCreate }
+            : { ...buildSMBPayload(pol), allow_fs_path_create: allowPathCreate };
+          const endpointSuffix = target.proto === 'nfs'
+            ? `nfs/exports/${target.id}`
+            : `smb/shares/${target.id}`;
+          await versionedFetch(endpointSuffix, 'PATCH', payload);
+          log('ok', `Applied policy "${pol.name}" to ${target.proto.toUpperCase()} ${target.name}`);
+          successCount++;
+        } catch(e) {
+          log('err', `Failed to apply to ${target.name}: ${e.message}`);
+          toast(`Failed on ${target.name}: ${e.message}`, 'err');
+        }
+      }
+      if (successCount > 0) toast(`Policy applied to ${successCount} target${successCount > 1 ? 's' : ''}`, 'ok');
+    }
+  } catch(e) {
+    log('err', `Apply failed: ${e.message}`);
+    toast(`Failed: ${e.message}`, 'err');
+  }
+}
+
+// ══════════════════════════════════════════════
+// Import / Export
+// ══════════════════════════════════════════════
+function exportPolicies() {
+  const blob = new Blob([JSON.stringify(policies, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'qumulo-policies.json';
+  a.click();
+  log('info', `Exported ${policies.length} policies to JSON`);
+  toast('Exported!', 'ok');
+}
+function importPolicies() {
+  document.getElementById('file-import').click();
+}
+function handleImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const imported = JSON.parse(ev.target.result);
+      if (!Array.isArray(imported)) throw new Error('Not an array');
+      const toAdd = imported.filter(p => !policies.find(x => x.id === p.id));
+      policies = [...policies, ...toAdd];
+      save();
+      renderSidebar();
+      toast(`Imported ${toAdd.length} policies`, 'ok');
+      log('ok', `Imported ${toAdd.length} new policies from ${file.name}`);
+    } catch(ex) {
+      toast('Invalid JSON file', 'err');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ══════════════════════════════════════════════
+// Activity Log
+// ══════════════════════════════════════════════
+function log(level, msg) {
+  const now = new Date();
+  const time = now.toTimeString().slice(0,8);
+  activityLog.unshift({ level, msg, time });
+  if (activityLog.length > 200) activityLog.pop();
+}
+function renderLog() {
+  const el = document.getElementById('log-entries');
+  if (!activityLog.length) { el.innerHTML = '<div class="text-muted text-sm" style="padding:12px 0">No activity yet.</div>'; return; }
+  el.innerHTML = activityLog.map(e => `
+  <div class="log-entry">
+    <span class="log-time">${e.time}</span>
+    <span class="log-level ${e.level}">${e.level.toUpperCase()}</span>
+    <span class="log-msg">${esc(e.msg)}</span>
+  </div>`).join('');
+}
+function clearLog() {
+  activityLog = [];
+  renderLog();
+}
+
+// ══════════════════════════════════════════════
+// Toast
+// ══════════════════════════════════════════════
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ══════════════════════════════════════════════
+// Utilities
+// ══════════════════════════════════════════════
+function esc(s) {
+  if (typeof s !== 'string') return String(s);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════
+// Init
+// ══════════════════════════════════════════════
+renderSidebar();
+renderEditor();
+if (cluster) {
+  setConnStatus('ok', cluster.host);
+  fetchShareLists();
+}
+
+// Seed sample policies if empty
+if (!policies.length) {
+  const sample1 = {
+    id: 'p_sample_nfs', name: 'Read-only NFS (internal only)', type: 'nfs',
+    nfs: { ...NFS_DEFAULTS, read_only: true, restrictions: [{ host_restrictions:['10.0.0.0/8'], read_only:true, require_privileged_port:true, user_mapping:'NFS_MAP_ROOT', map_to_user_id:'65534', map_to_group_id:'65534' }] },
+    smb: { ...SMB_DEFAULTS }
+  };
+  const sample2 = {
+    id: 'p_sample_smb', name: 'Encrypted SMB (corp)', type: 'smb',
+    nfs: { ...NFS_DEFAULTS },
+    smb: { ...SMB_DEFAULTS, require_encryption: true, network_permissions: [{ type:'ALLOWED', address_ranges:['192.168.0.0/16'], rights:['SMB_RIGHT_READ','SMB_RIGHT_WRITE','SMB_RIGHT_CHANGE_PERMISSIONS'] }] }
+  };
+  const sample3 = {
+    id: 'p_sample_both', name: 'Open access (NFS + SMB)', type: 'both',
+    nfs: { ...NFS_DEFAULTS, restrictions: JSON.parse(JSON.stringify(NFS_DEFAULTS.restrictions)) },
+    smb: { ...SMB_DEFAULTS, network_permissions: JSON.parse(JSON.stringify(SMB_DEFAULTS.network_permissions)) }
+  };
+  policies = [sample1, sample2, sample3];
+  save();
+  renderSidebar();
+}
+</script>
+</body>
+</html>
