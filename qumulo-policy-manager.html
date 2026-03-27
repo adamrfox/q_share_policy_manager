@@ -727,8 +727,23 @@ Select a policy and target to preview the API call.
 // State
 // ══════════════════════════════════════════════
 let policies = JSON.parse(localStorage.getItem('qpm-policies') || '[]');
-// Migrate: ensure require_privileged_port defaults to true on any existing restriction
-policies.forEach(p => { (p.nfs?.restrictions||[]).forEach(r => { if (r.require_privileged_port === false) r.require_privileged_port = true; }); });
+// Migrations — run on every load to fix stale stored data
+policies.forEach(p => {
+  // NFS: ensure require_privileged_port defaults to true
+  (p.nfs?.restrictions||[]).forEach(r => { if (r.require_privileged_port === false) r.require_privileged_port = true; });
+  // SMB: ensure network_permissions has at least one open ALLOWED rule
+  if (p.smb && (!p.smb.network_permissions || p.smb.network_permissions.length === 0)) {
+    p.smb.network_permissions = [{ type: 'ALLOWED', address_ranges: [], rights: ['READ','WRITE','CHANGE_PERMISSIONS'] }];
+  }
+  // SMB: ensure bytes_per_sector and mode defaults are set
+  if (p.smb) {
+    if (!p.smb.bytes_per_sector) p.smb.bytes_per_sector = '512';
+    if (!p.smb.default_directory_create_mode) p.smb.default_directory_create_mode = '0755';
+    if (!p.smb.default_file_create_mode) p.smb.default_file_create_mode = '0644';
+  }
+});
+// Persist any migrations immediately
+localStorage.setItem('qpm-policies', JSON.stringify(policies));
 let cluster = JSON.parse(localStorage.getItem('qpm-cluster') || 'null');
 let activePolicy = null;
 let activityLog = [];
@@ -1519,52 +1534,40 @@ function updateCreateNewFields() {
   const canBrowse = !!cluster;
   const bb = canBrowse ? browseBtn('new-fs-path') : '';
 
-  if (type === 'both') {
-    container.innerHTML = `
-      <div class="notice info" style="margin-bottom:10px">Both NFS export and SMB share will be created using the same name and path.</div>
-      <div class="form-group">
-        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
-        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects">
-        <div id="browser-new-fs-path"></div>
-        <div id="queue-new-fs-path"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Export / Share name</label>
-        <input class="form-input" id="new-share-name" placeholder="e.g. projects">
-      </div>`;
-  } else if (type === 'smb') {
-    container.innerHTML = `
-      <div class="form-group">
-        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
-        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects">
-        <div id="browser-new-fs-path"></div>
-        <div id="queue-new-fs-path"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Share name</label>
-        <input class="form-input" id="new-share-name" placeholder="e.g. projects">
-      </div>`;
-  } else {
-    // NFS: fs path first, export path second
-    container.innerHTML = `
-      <div class="form-group">
-        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
-        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects, /data/archive">
-        <div id="browser-new-fs-path"></div>
-        <div id="queue-new-fs-path"></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Export path</label>
-        <input class="form-input" id="new-share-name" placeholder="e.g. /exports/projects">
-      </div>`;
-  }
-  // Re-wire preview update on input — including fs-path for comma-parse
-  container.querySelectorAll('input').forEach(el => {
-    el.addEventListener('input', () => { if (el.id === 'new-fs-path') { syncExportPathField(); updateApplyPreview(); } else { syncFsPathField(); syncExportPathField(); updateApplyPreview(); } });
-  });
+  const nameLabel = type === 'nfs' ? 'Export path' : type === 'smb' ? 'Share name' : 'Export / Share name';
+  const namePlaceholder = type === 'nfs' ? 'e.g. /exports/projects' : 'e.g. projects';
+  const pathPlaceholder = type === 'nfs' ? 'e.g. /data/projects, /data/archive' : 'e.g. /data/projects';
+  const bothNotice = type === 'both'
+    ? '<div class="notice info" style="margin-bottom:10px">Both NFS export and SMB share will be created using the same name and path.</div>'
+    : '';
+
+  container.innerHTML = `
+    ${bothNotice}
+    <div class="form-group">
+      <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
+      <input class="form-input" id="new-fs-path" placeholder="${pathPlaceholder}">
+      <div id="browser-new-fs-path"></div>
+      <div id="queue-new-fs-path"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">${nameLabel} <span id="name-field-hint" style="font-weight:400;color:var(--text3);text-transform:none;letter-spacing:0;font-size:11px"></span></label>
+      <input class="form-input" id="new-share-name" placeholder="${namePlaceholder}">
+      <div id="name-field-desc" style="font-size:11px;color:var(--text3);margin-top:3px"></div>
+    </div>`;
+
+  // Re-wire events
   const fsField = container.querySelector('#new-fs-path');
-  if (fsField) fsField.addEventListener('blur', parseFsPathField);
+  const nameField = container.querySelector('#new-share-name');
+  if (fsField) {
+    fsField.addEventListener('input', () => { syncExportPathField(); updateApplyPreview(); });
+    fsField.addEventListener('blur', parseFsPathField);
+  }
+  if (nameField) {
+    nameField.addEventListener('input', updateNameDesc);
+    nameField.addEventListener('focusout', parseNameField);
+  }
   syncFsPathField();
+  syncNameField();
   syncExportPathField();
 }
 
@@ -1699,6 +1702,7 @@ function toggleBrowserCheck(targetId, path, checked) {
     renderPathQueue(targetId);
   }
   syncFsPathField();
+  syncNameField();
   syncExportPathField();
   updateApplyPreview();
 }
@@ -1717,6 +1721,7 @@ function addBrowserSelected(targetId) {
   sel.clear();
   renderPathQueue(targetId);
   syncFsPathField();
+  syncNameField();
   updateApplyPreview();
   renderBrowser(targetId); // redraw browser with checkboxes cleared
 }
@@ -1740,6 +1745,7 @@ function removeFromPathQueue(targetId, fsPath) {
   if (!pathQueues[targetId]) return;
   pathQueues[targetId] = pathQueues[targetId].filter(e => e.fsPath !== fsPath);
   renderPathQueue(targetId);
+  syncNameField();
   updateApplyPreview();
 }
 
@@ -1760,6 +1766,73 @@ function syncFsPathField() {
   const allPaths = [...committed.map(e => e.fsPath), ...pending];
   // Always write — including empty string to clear when everything is removed
   field.value = allPaths.join(', ');
+}
+
+// Sync the name field from the queue — comma-separated, one name per path
+function syncNameField() {
+  const field = document.getElementById('new-share-name');
+  if (!field || field === document.activeElement) return; // don't overwrite while typing
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const allEntries = [
+    ...committed,
+    ...pending.map(p => ({ fsPath: p, name: p.split('/').filter(Boolean).pop() || p }))
+  ];
+  if (!allEntries.length) { field.value = ''; return; }
+  field.value = allEntries.map(e => e.name).join(', ');
+  // Update hint
+  const hint = document.getElementById('name-field-hint');
+  const desc = document.getElementById('name-field-desc');
+  if (hint) hint.textContent = allEntries.length > 1 ? `(${allEntries.length} names, comma-separated)` : '';
+  if (desc && allEntries.length > 1) {
+    desc.innerHTML = allEntries.map(e => `<span style="font-family:var(--font)">${esc(e.name)}</span> → <span style="font-family:var(--font);color:var(--text2)">${esc(e.fsPath)}</span>`).join('<br>');
+  } else if (desc) {
+    desc.innerHTML = '';
+  }
+  // Also update via updateNameDesc if field not focused
+  if (document.getElementById('new-share-name') !== document.activeElement) updateNameDesc();
+}
+
+// Parse the name field — split by comma and update queue entry names to match
+// Update the name→path mapping description live as user types (no queue mutation)
+function updateNameDesc() {
+  const nameField = document.getElementById('new-share-name');
+  const desc      = document.getElementById('name-field-desc');
+  const hint      = document.getElementById('name-field-hint');
+  if (!nameField || !desc) return;
+  const names     = nameField.value.split(',').map(s => s.trim()).filter(Boolean);
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const paths = [...committed.map(e => e.fsPath), ...pending];
+  if (paths.length <= 1) { desc.innerHTML = ''; if (hint) hint.textContent = ''; updateApplyPreview(); return; }
+  if (hint) hint.textContent = `(${paths.length} names, comma-separated)`;
+  desc.innerHTML = paths.map((p, i) => {
+    const name = names[i] || p.split('/').filter(Boolean).pop() || p;
+    return `<span style="font-family:var(--font)">${esc(name)}</span> → <span style="font-family:var(--font);color:var(--text2)">${esc(p)}</span>`;
+  }).join('<br>');
+  updateApplyPreview();
+}
+
+function parseNameField() {
+  const field = document.getElementById('new-share-name');
+  if (!field) return;
+  const names = field.value.split(',').map(s => s.trim()).filter(Boolean);
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const allEntries = [...committed, ...pending.map(p => ({ fsPath: p, name: p.split('/').filter(Boolean).pop() || p }))];
+  // Assign names positionally — if fewer names than paths, keep existing name for remainder
+  names.forEach((name, i) => {
+    if (i < committed.length) {
+      committed[i].name = name;
+    }
+  });
+  updateNameDesc();
 }
 
 // Parse the fs path field on blur — reconcile the queue to match exactly what is in the field.
@@ -2006,9 +2079,11 @@ async function applyPolicy() {
       // Build list of {fsPath, name} entries — from queue if populated, else from manual inputs
       const queue = pathQueues['new-fs-path']?.length
         ? pathQueues['new-fs-path']
-        : (document.getElementById('new-fs-path')?.value || '')
-            .split(',').map(s => s.trim()).filter(s => s.startsWith('/'))
-            .map(p => ({ fsPath: p, name: document.getElementById('new-share-name')?.value.trim() || p.split('/').filter(Boolean).pop() || p }));
+        : (() => {
+            const paths = (document.getElementById('new-fs-path')?.value || '').split(',').map(s => s.trim()).filter(s => s.startsWith('/'));
+            const names = (document.getElementById('new-share-name')?.value || '').split(',').map(s => s.trim());
+            return paths.map((p, i) => ({ fsPath: p, name: names[i] || p.split('/').filter(Boolean).pop() || p }));
+          })();
       if (!queue.length || !queue[0].fsPath || !queue[0].name) {
         toast('Enter a name and path, or use Browse to queue paths.', 'err'); return;
       }
