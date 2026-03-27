@@ -750,15 +750,16 @@ const NFS_DEFAULTS = {
 
 const SMB_DEFAULTS = {
   description: '',
-  read_only: false,
-  allow_guest_access: false,
   require_encryption: false,
-  hide_previous_versions: false,
-  directory_oplock_enabled: true,
-  bytes_per_sector: 512,
-  default_dir_create_mode: '0755',
+  access_based_enumeration_enabled: false,
+  default_directory_create_mode: '0755',
   default_file_create_mode: '0644',
-  network_permissions: []
+  bytes_per_sector: '512',
+  expand_fs_path_variables: false,
+  permissions: [],
+  network_permissions: [
+    { type: 'ALLOWED', address_ranges: [], rights: ['READ','WRITE','CHANGE_PERMISSIONS'] }
+  ]
 };
 
 // ══════════════════════════════════════════════
@@ -1031,40 +1032,44 @@ function renderSMBEditor(p) {
       <input class="form-input" value="${esc(s.description)}" oninput="updateSMB('description',this.value)" placeholder="Optional description">
     </div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" ${s.read_only?'checked':''} onchange="updateSMB('read_only',this.checked)"><span class="toggle-slider"></span></label>
-      <div class="toggle-label">Read only</div>
-    </div>
-    <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" ${s.allow_guest_access?'checked':''} onchange="updateSMB('allow_guest_access',this.checked)"><span class="toggle-slider"></span></label>
-      <div class="toggle-label">Guest access</div>
-    </div>
-    <div class="toggle-row">
       <label class="toggle"><input type="checkbox" ${s.require_encryption?'checked':''} onchange="updateSMB('require_encryption',this.checked)"><span class="toggle-slider"></span></label>
       <div class="toggle-label">Require encryption</div>
     </div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" ${s.hide_previous_versions?'checked':''} onchange="updateSMB('hide_previous_versions',this.checked)"><span class="toggle-slider"></span></label>
-      <div class="toggle-label">Hide previous versions</div>
+      <label class="toggle"><input type="checkbox" ${s.access_based_enumeration_enabled?'checked':''} onchange="updateSMB('access_based_enumeration_enabled',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Access-based enumeration</div>
     </div>
     <div class="toggle-row">
-      <label class="toggle"><input type="checkbox" ${s.directory_oplock_enabled?'checked':''} onchange="updateSMB('directory_oplock_enabled',this.checked)"><span class="toggle-slider"></span></label>
-      <div class="toggle-label">Directory oplocks</div>
+      <label class="toggle"><input type="checkbox" ${s.expand_fs_path_variables?'checked':''} onchange="updateSMB('expand_fs_path_variables',this.checked)"><span class="toggle-slider"></span></label>
+      <div class="toggle-label">Expand filesystem path variables</div>
     </div>
     <div class="grid-2" style="margin-top:12px">
       <div class="form-group">
-        <label class="form-label">Default dir create mode</label>
-        <input class="form-input" value="${esc(s.default_dir_create_mode)}" oninput="updateSMB('default_dir_create_mode',this.value)" placeholder="0755">
+        <label class="form-label">Default directory create mode</label>
+        <input class="form-input" value="${esc(s.default_directory_create_mode||'0755')}" oninput="updateSMB('default_directory_create_mode',this.value)" placeholder="0755">
       </div>
       <div class="form-group">
         <label class="form-label">Default file create mode</label>
-        <input class="form-input" value="${esc(s.default_file_create_mode)}" oninput="updateSMB('default_file_create_mode',this.value)" placeholder="0644">
+        <input class="form-input" value="${esc(s.default_file_create_mode||'0644')}" oninput="updateSMB('default_file_create_mode',this.value)" placeholder="0644">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Bytes per sector</label>
+        <input class="form-input" value="${esc(s.bytes_per_sector||'512')}" oninput="updateSMB('bytes_per_sector',this.value)" placeholder="512">
       </div>
     </div>
   </div>
 
   <div class="card">
     <div class="card-title">
-      Network permissions
+      Share permissions (trustee ACL)
+      <button class="btn btn-sm" style="margin-left:auto" onclick="addSMBSharePerm()">+ Add</button>
+    </div>
+    <div id="smb-share-perms">${renderSMBSharePerms(s.permissions||[])}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      Network permissions (IP-based)
       <button class="btn btn-sm" style="margin-left:auto" onclick="addSMBPermission()">+ Add</button>
     </div>
     <div id="smb-permissions">${renderSMBPermissions(s.network_permissions)}</div>
@@ -1077,15 +1082,57 @@ function renderSMBEditor(p) {
   `;
 }
 
-const SMB_RIGHTS = ['SMB_RIGHT_READ','SMB_RIGHT_WRITE','SMB_RIGHT_CHANGE_PERMISSIONS','SMB_RIGHT_DELETE','SMB_RIGHT_FULL_CONTROL'];
+const SMB_NET_RIGHTS   = ['READ','WRITE','CHANGE_PERMISSIONS'];
+const SMB_SHARE_RIGHTS = ['READ','WRITE','CHANGE_PERMISSIONS'];
+let SMB_DOMAINS = ['LOCAL']; // AD domain added dynamically after cluster connect
+// ── Trustee (share) permissions ──
+function renderSMBSharePerms(perms) {
+  if (!perms.length) return '<div class="text-muted text-sm" style="padding:4px 0">No share permissions — all authenticated users have access by default.</div>';
+  return perms.map((perm, i) => `
+  <div class="card" style="margin-bottom:8px;background:var(--bg3)">
+    <div style="display:flex;align-items:center;margin-bottom:8px;gap:8px">
+      <span style="font-size:12px;font-weight:600;color:var(--text2)">Trustee ${i+1}</span>
+      <select class="form-input" style="width:auto" onchange="updateSMBSharePerm(${i},'type',this.value)">
+        <option value="ALLOWED" ${perm.type==='ALLOWED'?'selected':''}>Allowed</option>
+        <option value="DENIED"  ${perm.type==='DENIED' ?'selected':''}>Denied</option>
+      </select>
+      <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="removeSMBSharePerm(${i})">Remove</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Trustee</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select class="form-input" style="width:auto;flex-shrink:0" onchange="updateSMBSharePermTrustee(${i},'domain',this.value)">
+          ${SMB_DOMAINS.map(d => `<option value="${d}" ${(perm.trustee?.domain||'LOCAL')===d?'selected':''}>${d}</option>`).join('')}
+        </select>
+        <span style="color:var(--text3);font-family:var(--font)">\</span>
+        <input class="form-input" value="${esc(perm.trustee?.name||perm.trustee?.auth_id||perm.trustee?.sid||'')}"
+          oninput="updateSMBSharePermTrusteeId(${i},this.value)" placeholder="username or SID">
+      </div>
+      <div class="text-muted text-sm" style="margin-top:4px">Sends as <code>${(perm.trustee?.domain||'LOCAL') !== 'LOCAL' ? esc(perm.trustee?.domain||'')+'\\' : ''}${esc(perm.trustee?.name||perm.trustee?.auth_id||'...')}</code></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Rights</label>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${SMB_SHARE_RIGHTS.map(r => `
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+          <input type="checkbox" ${(perm.rights||[]).includes(r)?'checked':''}
+            onchange="toggleSMBShareRight(${i},'${r}',this.checked)" style="cursor:pointer">
+          ${r.toLowerCase().replace(/_/g,' ')}
+        </label>`).join('')}
+      </div>
+    </div>
+  </div>`).join('');
+}
+
+// ── Network (IP-based) permissions ──
 function renderSMBPermissions(perms) {
   return perms.map((perm, i) => `
   <div class="card" style="margin-bottom:8px;background:var(--bg3)">
     <div style="display:flex;align-items:center;margin-bottom:8px;gap:8px">
-      <span style="font-size:12px;font-weight:600;color:var(--text2)">Permission ${i+1}</span>
+      <span style="font-size:12px;font-weight:600;color:var(--text2)">Rule ${i+1}</span>
       <select class="form-input" style="width:auto" onchange="updateSMBPerm(${i},'type',this.value)">
         <option value="ALLOWED" ${perm.type==='ALLOWED'?'selected':''}>Allowed</option>
-        <option value="DENIED" ${perm.type==='DENIED'?'selected':''}>Denied</option>
+        <option value="DENIED"  ${perm.type==='DENIED' ?'selected':''}>Denied</option>
       </select>
       <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="removeSMBPermission(${i})">Remove</button>
     </div>
@@ -1096,20 +1143,65 @@ function renderSMBPermissions(perms) {
     <div class="form-group">
       <label class="form-label">Rights</label>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${SMB_RIGHTS.map(r => `
+        ${SMB_NET_RIGHTS.map(r => `
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
           <input type="checkbox" ${(perm.rights||[]).includes(r)?'checked':''}
             onchange="toggleSMBRight(${i},'${r}',this.checked)" style="cursor:pointer">
-          ${r.replace('SMB_RIGHT_','').toLowerCase()}
+          ${r.toLowerCase().replace(/_/g,' ')}
         </label>`).join('')}
       </div>
     </div>
-  </div>`).join('') || '<div class="text-muted text-sm" style="padding:4px 0">No permissions defined.</div>';
+  </div>`).join('') || '<div class="text-muted text-sm" style="padding:4px 0">No network rules — all IPs permitted.</div>';
+}
+
+
+// Trustee perm CRUD
+function addSMBSharePerm() {
+  if (!activePolicy) return;
+  if (!activePolicy.smb.permissions) activePolicy.smb.permissions = [];
+  activePolicy.smb.permissions.push({
+    type: 'ALLOWED',
+    trustee: { domain: 'LOCAL', auth_id: '', uid: null, gid: null, sid: null, name: null },
+    rights: ['READ','WRITE','CHANGE_PERMISSIONS']
+  });
+  save();
+  document.getElementById('smb-share-perms').innerHTML = renderSMBSharePerms(activePolicy.smb.permissions);
+  refreshPreviews();
+}
+function removeSMBSharePerm(i) {
+  activePolicy.smb.permissions.splice(i, 1);
+  save();
+  document.getElementById('smb-share-perms').innerHTML = renderSMBSharePerms(activePolicy.smb.permissions);
+  refreshPreviews();
+}
+function updateSMBSharePerm(i, key, val) {
+  activePolicy.smb.permissions[i][key] = val;
+  save(); refreshPreviews();
+}
+function updateSMBSharePermTrustee(i, key, val) {
+  if (!activePolicy.smb.permissions[i].trustee) activePolicy.smb.permissions[i].trustee = {};
+  activePolicy.smb.permissions[i].trustee[key] = val;
+  save(); refreshPreviews();
+}
+function updateSMBSharePermTrusteeId(i, val) {
+  const t = activePolicy.smb.permissions[i].trustee;
+  // Heuristic: looks like a SID, auth_id (numeric), or name
+  if (val.startsWith('S-')) { t.sid = val; t.name = null; t.auth_id = null; }
+  else if (/^\d+$/.test(val)) { t.auth_id = val; t.sid = null; t.name = null; }
+  else { t.name = val; t.sid = null; t.auth_id = null; }
+  save(); refreshPreviews();
+}
+function toggleSMBShareRight(i, right, checked) {
+  const rights = activePolicy.smb.permissions[i].rights || [];
+  if (checked && !rights.includes(right)) rights.push(right);
+  if (!checked) { const idx = rights.indexOf(right); if (idx>-1) rights.splice(idx,1); }
+  activePolicy.smb.permissions[i].rights = rights;
+  save(); refreshPreviews();
 }
 
 function addSMBPermission() {
   if (!activePolicy) return;
-  activePolicy.smb.network_permissions.push({ type:'ALLOWED', address_ranges:[], rights:['SMB_RIGHT_READ','SMB_RIGHT_WRITE'] });
+  activePolicy.smb.network_permissions.push({ type:'ALLOWED', address_ranges:[], rights:['READ','WRITE','CHANGE_PERMISSIONS'] });
   save();
   document.getElementById('smb-permissions').innerHTML = renderSMBPermissions(activePolicy.smb.network_permissions);
 }
@@ -1160,15 +1252,28 @@ function buildNFSPayload(p) {
 function buildSMBPayload(p) {
   const s = p.smb;
   return {
-    description: s.description,
-    read_only: s.read_only,
-    allow_guest_access: s.allow_guest_access,
-    require_encryption: s.require_encryption,
-    hide_previous_versions: s.hide_previous_versions,
-    directory_oplock_enabled: s.directory_oplock_enabled,
-    bytes_per_sector: s.bytes_per_sector,
-    default_dir_create_mode: s.default_dir_create_mode,
-    default_file_create_mode: s.default_file_create_mode,
+    description:                      s.description       || '',
+    require_encryption:               s.require_encryption,
+    access_based_enumeration_enabled: s.access_based_enumeration_enabled,
+    default_directory_create_mode:    s.default_directory_create_mode || '0755',
+    default_file_create_mode:         s.default_file_create_mode      || '0644',
+    bytes_per_sector:                 s.bytes_per_sector  || '512',
+    tenant_id:                        null,
+    expand_fs_path_variables:         false,
+    permissions: (s.permissions || []).map(perm => {
+      const t = perm.trustee || {};
+      // Qumulo expects trustee as just { name } where name is "domain\user" for AD
+      // or just "username" for LOCAL. Build the composite name here.
+      let trusteeName;
+      if (t.domain && t.domain !== 'LOCAL' && t.name) {
+        trusteeName = t.domain + '\\' + t.name;
+      } else {
+        trusteeName = t.name || t.auth_id || t.sid || '';
+      }
+      const validRights = ['READ','WRITE','CHANGE_PERMISSIONS'];
+      const rights = (perm.rights || []).filter(r => validRights.includes(r));
+      return { type: perm.type, rights, trustee: { name: trusteeName } };
+    }),
     network_permissions: s.network_permissions
   };
 }
@@ -1231,6 +1336,7 @@ async function connectCluster() {
     closeModalDirect();
     toast(`Connected to ${host}`, 'ok');
     fetchShareLists();
+    fetchAdDomains();
   } catch(e) {
     setConnStatus('err', 'Failed');
     log('err', `Connection failed: ${e.message}`);
@@ -1281,6 +1387,33 @@ function clusterFetch(path, method = 'GET', body = null) {
 }
 
 // Try API versions v3 → v2 → v1 in order, cache the working version per endpoint prefix.
+// Fetch AD status and add the joined domain to SMB_DOMAINS if present
+async function fetchAdDomains() {
+  SMB_DOMAINS = ['LOCAL']; // reset on each connect
+  const adEndpoints = ['/v3/ad/status', '/v2/ad/status', '/v1/ad/status'];
+  for (const endpoint of adEndpoints) {
+    try {
+      const res = await clusterFetch(endpoint);
+      const status = res.status || res.domain_status || '';
+      const domain = res.domain || res.domain_name || '';
+      if (status.includes('JOINED') && domain) {
+        SMB_DOMAINS.push(domain);
+        log('ok', `AD domain detected: ${domain}`);
+      } else {
+        log('info', `Cluster AD status: ${status || 'unknown'}`);
+      }
+      break;
+    } catch(e) {
+      log('warn', `AD status ${endpoint} failed: ${e.message}`);
+    }
+  }
+  // Re-render domain dropdowns if the SMB editor is currently open
+  const permsEl = document.getElementById('smb-share-perms');
+  if (permsEl && activePolicy?.smb?.permissions) {
+    permsEl.innerHTML = renderSMBSharePerms(activePolicy.smb.permissions);
+  }
+}
+
 // versionCache keys are endpoint prefixes like 'nfs/exports' or 'smb/shares'.
 const versionCache = {};
 async function versionedFetch(endpointSuffix, method = 'GET', body = null) {
@@ -1330,6 +1463,7 @@ async function fetchShareLists() {
     const smbRes = await versionedFetch('smb/shares/');
     clusterShares.smb = smbRes.entries || smbRes || [];
     log('ok', `Fetched ${clusterShares.smb.length} SMB shares`);
+
   } catch(e) {
     log('err', `SMB share fetch failed: ${e.message}`);
     clusterShares.smb = [];
@@ -2032,7 +2166,7 @@ if (!policies.length) {
   const sample2 = {
     id: 'p_sample_smb', name: 'Encrypted SMB (corp)', type: 'smb',
     nfs: { ...NFS_DEFAULTS },
-    smb: { ...SMB_DEFAULTS, require_encryption: true, network_permissions: [{ type:'ALLOWED', address_ranges:['192.168.0.0/16'], rights:['SMB_RIGHT_READ','SMB_RIGHT_WRITE','SMB_RIGHT_CHANGE_PERMISSIONS'] }] }
+    smb: { ...SMB_DEFAULTS, require_encryption: true, network_permissions: [{ type:'ALLOWED', address_ranges:['192.168.0.0/16'], rights:['READ','WRITE','CHANGE_PERMISSIONS'] }] , permissions: [] }
   };
   const sample3 = {
     id: 'p_sample_both', name: 'Open access (NFS + SMB)', type: 'both',
