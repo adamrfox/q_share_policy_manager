@@ -544,6 +544,8 @@
     <div id="conn-dot"></div>
     <span id="conn-label">Not connected</span>
   </button>
+  <button id="disconnect-btn" onclick="disconnectCluster()" style="display:none;padding:4px 10px;font-size:12px;border-radius:20px;border:1px solid var(--danger-bg);background:transparent;color:var(--danger);cursor:pointer;transition:all .15s" onmouseover="this.style.background='var(--danger-bg)'" onmouseout="this.style.background='transparent'">Disconnect</button>
+  <button id="refresh-btn" onclick="refreshCluster()" style="display:none;padding:4px 10px;font-size:12px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--border2)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">↻ Refresh</button>
 </div>
 
 <!-- Sidebar -->
@@ -717,6 +719,10 @@ policies.forEach(p => {
   if (p.smb && (!p.smb.network_permissions || p.smb.network_permissions.length === 0)) {
     p.smb.network_permissions = [{ type: 'ALLOWED', address_ranges: [], rights: ['READ','WRITE','CHANGE_PERMISSIONS'] }];
   }
+  // SMB: strip stale SMB_RIGHT_ prefix from stored network_permissions rights
+  (p.smb?.network_permissions || []).forEach(np => {
+    np.rights = (np.rights || []).map(r => r.replace('SMB_RIGHT_', '')).filter(r => ['READ','WRITE','CHANGE_PERMISSIONS'].includes(r));
+  });
   // SMB: ensure bytes_per_sector and mode defaults are set
   if (p.smb) {
     if (!p.smb.bytes_per_sector) p.smb.bytes_per_sector = '512';
@@ -1085,7 +1091,7 @@ const SMB_SHARE_RIGHTS = ['READ','WRITE','CHANGE_PERMISSIONS'];
 let SMB_DOMAINS = ['LOCAL']; // AD domain added dynamically after cluster connect
 // ── Trustee (share) permissions ──
 function renderSMBSharePerms(perms) {
-  if (!perms.length) return '<div class="text-muted text-sm" style="padding:4px 0">No share permissions — all authenticated users have access by default.</div>';
+  if (!perms.length) return '<div class="text-muted text-sm" style="padding:4px 0;color:var(--warning)">No share permissions — no users will have access. Add at least one trustee.</div>';
   return perms.map((perm, i) => `
   <div class="card" style="margin-bottom:8px;background:var(--bg3)">
     <div style="display:flex;align-items:center;margin-bottom:8px;gap:8px">
@@ -1272,7 +1278,11 @@ function buildSMBPayload(p) {
       const rights = (perm.rights || []).filter(r => validRights.includes(r));
       return { type: perm.type, rights, trustee: { name: trusteeName } };
     }),
-    network_permissions: s.network_permissions
+    network_permissions: (s.network_permissions || []).map(p => ({
+      type:          p.type,
+      address_ranges: p.address_ranges || [],
+      rights:        (p.rights || []).map(r => r.replace('SMB_RIGHT_', '')).filter(r => ['READ','WRITE','CHANGE_PERMISSIONS'].includes(r))
+    }))
   };
 }
 
@@ -1330,6 +1340,8 @@ async function connectCluster() {
     Object.keys(fsBrowseCache).forEach(k => delete fsBrowseCache[k]);
     save();
     setConnStatus('ok', `${host}`);
+    document.getElementById('disconnect-btn').style.display = 'inline-flex';
+    document.getElementById('refresh-btn').style.display = 'inline-flex';
     log('ok', `Authenticated. Token acquired.`);
     closeModalDirect();
     toast(`Connected to ${host}`, 'ok');
@@ -1350,6 +1362,46 @@ async function connectCluster() {
     log('err', `Connection failed: ${e.message}`);
     toast(`Connection failed: ${e.message}`, 'err');
   }
+}
+
+async function refreshCluster() {
+  if (!cluster) return;
+  const btn = document.getElementById('refresh-btn');
+  if (btn) { btn.textContent = '↻ Refreshing…'; btn.disabled = true; }
+  log('info', `Refreshing data from ${cluster.host}…`);
+  try {
+    await Promise.all([fetchShareLists(), fetchAdDomains()]);
+    resetApplyState();
+    if (document.getElementById('view-apply').classList.contains('active')) {
+      updateCreateNewFields();
+      updateShareList();
+      updateApplyPreview();
+    }
+    log('ok', `Refreshed data from ${cluster.host}`);
+    toast('Cluster data refreshed', 'ok');
+  } catch(e) {
+    log('err', `Refresh failed: ${e.message}`);
+    toast(`Refresh failed: ${e.message}`, 'err');
+  } finally {
+    if (btn) { btn.textContent = '↻ Refresh'; btn.disabled = false; }
+  }
+}
+
+function disconnectCluster() {
+  cluster = null;
+  localStorage.removeItem('qpm-cluster');
+  clusterShares = { nfs: [], smb: [] };
+  SMB_DOMAINS = ['LOCAL'];
+  Object.keys(versionCache).forEach(k => delete versionCache[k]);
+  Object.keys(fsBrowseCache).forEach(k => delete fsBrowseCache[k]);
+  setConnStatus('', 'Not connected');
+  document.getElementById('disconnect-btn').style.display = 'none';
+  document.getElementById('refresh-btn').style.display = 'none';
+  resetApplyState();
+  updateShareList();
+  updateApplyPreview();
+  log('info', 'Disconnected from cluster');
+  toast('Disconnected', 'info');
 }
 
 function setConnStatus(state, label) {
@@ -2351,6 +2403,8 @@ renderSidebar();
 renderEditor();
 if (cluster) {
   setConnStatus('ok', cluster.host);
+  document.getElementById('disconnect-btn').style.display = 'inline-flex';
+  document.getElementById('refresh-btn').style.display = 'inline-flex';
   fetchShareLists();
 }
 
