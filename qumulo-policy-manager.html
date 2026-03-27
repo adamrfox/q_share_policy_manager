@@ -734,6 +734,22 @@ let policies = JSON.parse(localStorage.getItem('qpm-policies') || '[]');
 policies.forEach(p => {
   // NFS: ensure require_privileged_port defaults to true
   (p.nfs?.restrictions||[]).forEach(r => { if (r.require_privileged_port === false) r.require_privileged_port = true; });
+  // NFS: migrate anon uid/gid from policy level into restriction level
+  if (p.nfs) {
+    if (p.nfs.anonymous_uid !== undefined || p.nfs.anonymous_gid !== undefined) {
+      (p.nfs.restrictions || []).forEach(r => {
+        if (r.anonymous_uid === undefined) r.anonymous_uid = p.nfs.anonymous_uid ?? 65534;
+        if (r.anonymous_gid === undefined) r.anonymous_gid = p.nfs.anonymous_gid ?? 65534;
+      });
+      delete p.nfs.anonymous_uid;
+      delete p.nfs.anonymous_gid;
+    }
+    // Ensure all restrictions have anon uid/gid
+    (p.nfs.restrictions || []).forEach(r => {
+      if (r.anonymous_uid === undefined) r.anonymous_uid = 65534;
+      if (r.anonymous_gid === undefined) r.anonymous_gid = 65534;
+    });
+  }
   // SMB: ensure network_permissions has at least one open ALLOWED rule
   if (p.smb && (!p.smb.network_permissions || p.smb.network_permissions.length === 0)) {
     p.smb.network_permissions = [{ type: 'ALLOWED', address_ranges: [], rights: ['READ','WRITE','CHANGE_PERMISSIONS'] }];
@@ -947,16 +963,6 @@ function renderNFSEditor(p) {
       <label class="toggle"><input type="checkbox" ${n.read_only?'checked':''} onchange="updateNFS('read_only',this.checked)"><span class="toggle-slider"></span></label>
       <div class="toggle-label">Read only</div>
     </div>
-    <div class="grid-2" style="margin-top:12px">
-      <div class="form-group">
-        <label class="form-label">Anonymous UID</label>
-        <input class="form-input" type="number" value="${n.anonymous_uid}" oninput="updateNFS('anonymous_uid',parseInt(this.value))" style="width:120px">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Anonymous GID</label>
-        <input class="form-input" type="number" value="${n.anonymous_gid}" oninput="updateNFS('anonymous_gid',parseInt(this.value))" style="width:120px">
-      </div>
-    </div>
   </div>
 
   <div class="card">
@@ -1002,6 +1008,16 @@ function renderNFSRestrictions(restrictions) {
         <option value="NFS_MAP_ROOT" ${r.user_mapping==='NFS_MAP_ROOT'?'selected':''}>Map root only</option>
       </select>
     </div>
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">Anonymous UID</label>
+        <input class="form-input" type="number" value="${r.anonymous_uid ?? 65534}" oninput="updateNFSRestriction(${i},'anonymous_uid',parseInt(this.value))" style="width:120px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Anonymous GID</label>
+        <input class="form-input" type="number" value="${r.anonymous_gid ?? 65534}" oninput="updateNFSRestriction(${i},'anonymous_gid',parseInt(this.value))" style="width:120px">
+      </div>
+    </div>
     ${r.user_mapping !== 'NFS_MAP_NONE' ? `
     <div class="grid-2">
       <div class="form-group">
@@ -1021,6 +1037,7 @@ function addNFSRestriction() {
   activePolicy.nfs.restrictions.push({
     host_restrictions: [], read_only: false, require_privileged_port: true,
     user_mapping: 'NFS_MAP_NONE', map_to_user_id: '0', map_to_group_id: '0',
+    anonymous_uid: 65534, anonymous_gid: 65534,
     required_authentication_mode: 'AUTHENTICATION_MODE_NONE'
   });
   save();
@@ -1258,9 +1275,9 @@ function buildNFSPayload(p) {
   const n = p.nfs;
   return {
     description: n.description,
-    read_only: n.read_only,
-    anonymous_uid: n.anonymous_uid,
-    anonymous_gid: n.anonymous_gid,
+    read_only:   n.read_only,
+    anonymous_uid: (n.restrictions?.[0]?.anonymous_uid) ?? 65534,
+    anonymous_gid: (n.restrictions?.[0]?.anonymous_gid) ?? 65534,
     restrictions: (n.restrictions || []).map(r => ({
       host_restrictions:            r.host_restrictions || [],
       read_only:                    r.read_only,
