@@ -700,6 +700,25 @@ Select a policy and target to preview the API call.
   </div>
 </div>
 
+<!-- Import conflict modal -->
+<div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center">
+  <div class="modal" style="max-width:480px">
+    <h3 id="import-modal-title">Policy conflict</h3>
+    <p id="import-modal-body" style="font-size:13px;color:var(--text2);margin-bottom:14px"></p>
+    <div class="toggle-row" style="margin-bottom:14px">
+      <label class="toggle"><input type="checkbox" id="import-apply-all"><span class="toggle-slider"></span></label>
+      <div>
+        <div class="toggle-label">Apply this decision to all remaining conflicts</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="resolveImport('skip')">Skip</button>
+      <button class="btn" onclick="resolveImport('copy')">Import as copy</button>
+      <button class="btn btn-primary" onclick="resolveImport('overwrite')">Overwrite</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
@@ -2331,6 +2350,13 @@ function exportPolicies() {
 function importPolicies() {
   document.getElementById('file-import').click();
 }
+// Import state
+let _importQueue    = [];   // pending conflicts
+let _importBulk     = null; // 'overwrite' | 'copy' | 'skip' — if apply-all was checked
+let _importAdded    = 0;
+let _importOverwritten = 0;
+let _importSkipped  = 0;
+
 function handleImport(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -2339,18 +2365,86 @@ function handleImport(e) {
     try {
       const imported = JSON.parse(ev.target.result);
       if (!Array.isArray(imported)) throw new Error('Not an array');
-      const toAdd = imported.filter(p => !policies.find(x => x.id === p.id));
-      policies = [...policies, ...toAdd];
-      save();
-      renderSidebar();
-      toast(`Imported ${toAdd.length} policies`, 'ok');
-      log('ok', `Imported ${toAdd.length} new policies from ${file.name}`);
+      _importQueue = [];
+      _importBulk  = null;
+      _importAdded = _importOverwritten = _importSkipped = 0;
+      const noConflict = [];
+      const conflicts  = [];
+      imported.forEach(p => {
+        if (policies.find(x => x.id === p.id || x.name === p.name)) conflicts.push(p);
+        else noConflict.push(p);
+      });
+      // Add non-conflicting policies immediately
+      noConflict.forEach(p => { policies.push(p); _importAdded++; });
+      if (!conflicts.length) {
+        save(); renderSidebar();
+        toast(`Imported ${_importAdded} policies`, 'ok');
+        log('ok', `Imported ${_importAdded} policies from ${file.name}`);
+        return;
+      }
+      _importQueue = conflicts;
+      processNextImport();
     } catch(ex) {
-      toast('Invalid JSON file', 'err');
+      toast('Invalid JSON file: ' + ex.message, 'err');
     }
   };
   reader.readAsText(file);
   e.target.value = '';
+}
+
+function processNextImport() {
+  if (!_importQueue.length) {
+    save(); renderSidebar();
+    const parts = [];
+    if (_importAdded)      parts.push(`${_importAdded} added`);
+    if (_importOverwritten) parts.push(`${_importOverwritten} overwritten`);
+    if (_importSkipped)    parts.push(`${_importSkipped} skipped`);
+    toast(`Import complete: ${parts.join(', ')}`, 'ok');
+    log('ok', `Import complete — ${parts.join(', ')}`);
+    document.getElementById('import-modal').style.display = 'none';
+    return;
+  }
+  const p = _importQueue[0];
+  // If bulk decision already made, apply it
+  if (_importBulk) {
+    applyImportDecision(_importBulk, p);
+    _importQueue.shift();
+    processNextImport();
+    return;
+  }
+  // Show conflict modal
+  const existing = policies.find(x => x.id === p.id || x.name === p.name);
+  document.getElementById('import-modal-title').textContent = 'Policy conflict';
+  document.getElementById('import-modal-body').innerHTML =
+    `A policy named <strong>${esc(p.name)}</strong> already exists.<br>
+     <span style="font-size:12px;color:var(--text3)">Existing: ${esc(existing?.name || '')} &nbsp;|&nbsp; Importing: ${esc(p.name)}</span>`;
+  document.getElementById('import-apply-all').checked = false;
+  document.getElementById('import-modal').style.display = 'flex';
+}
+
+function resolveImport(decision) {
+  const applyAll = document.getElementById('import-apply-all').checked;
+  const p = _importQueue[0];
+  if (applyAll) _importBulk = decision;
+  applyImportDecision(decision, p);
+  _importQueue.shift();
+  processNextImport();
+}
+
+function applyImportDecision(decision, p) {
+  if (decision === 'overwrite') {
+    const idx = policies.findIndex(x => x.id === p.id || x.name === p.name);
+    if (idx >= 0) policies[idx] = p; else policies.push(p);
+    _importOverwritten++;
+  } else if (decision === 'copy') {
+    const copy = JSON.parse(JSON.stringify(p));
+    copy.id   = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+    copy.name = p.name + ' (imported)';
+    policies.push(copy);
+    _importAdded++;
+  } else {
+    _importSkipped++;
+  }
 }
 
 // ══════════════════════════════════════════════
