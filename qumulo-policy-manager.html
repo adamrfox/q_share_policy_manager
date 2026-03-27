@@ -402,25 +402,7 @@
     width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; accent-color: var(--accent);
   }
   .pb-entry.pb-selected { background: var(--accent-bg); }
-  .pb-queue {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .pb-queue-entry {
-    display: grid;
-    grid-template-columns: 1fr 1fr auto;
-    gap: 6px;
-    align-items: center;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-  .pb-queue-path { font-family: var(--font); color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pb-queue-actions { display: flex; gap: 4px; justify-content: flex-end; }
+
   .pb-select-btn {
     margin-left: auto;
     font-size: 10px;
@@ -846,6 +828,7 @@ function selectPolicy(id) {
   const applyDropdown = document.getElementById('apply-policy-select');
   if (applyDropdown && document.getElementById('view-apply').classList.contains('active')) {
     applyDropdown.value = id;
+    resetApplyState();
     updateCreateNewFields();
     updateApplyPreview();
     updateShareList();
@@ -1352,6 +1335,16 @@ async function connectCluster() {
     toast(`Connected to ${host}`, 'ok');
     fetchShareLists();
     fetchAdDomains();
+    // Enable browse button and re-render create-new fields now that cluster is connected
+    document.querySelectorAll('[id^="browse-btn-"]').forEach(btn => {
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.style.cursor = '';
+      btn.title = 'Browse cluster filesystem';
+    });
+    if (document.getElementById('view-apply').classList.contains('active')) {
+      updateCreateNewFields();
+    }
   } catch(e) {
     setConnStatus('err', 'Failed');
     log('err', `Connection failed: ${e.message}`);
@@ -1503,6 +1496,21 @@ function refreshApplyView() {
   updateShareList();
 }
 
+// Clear all path/browser state when the policy or action changes
+function resetApplyState() {
+  pathQueues['new-fs-path'] = [];
+  if (browserState['new-fs-path']) {
+    browserState['new-fs-path'].selected = new Set();
+    browserState['new-fs-path'].open = false;
+    const el = document.getElementById('browser-new-fs-path');
+    if (el) el.innerHTML = '';
+  }
+  selectedShares = [];
+  // Clear the rendered select
+  const sel = document.getElementById('share-select');
+  if (sel) Array.from(sel.options).forEach(o => o.selected = false);
+}
+
 document.addEventListener('change', function(e) {
   if (e.target.id === 'apply-policy-select') {
     // Sync sidebar selection to match dropdown
@@ -1511,6 +1519,7 @@ document.addEventListener('change', function(e) {
     renderSidebar();    // highlights the matching policy in the sidebar
   }
   if (e.target.id === 'apply-policy-select' || e.target.id === 'apply-action') {
+    resetApplyState();
     const action = document.getElementById('apply-action').value;
     document.getElementById('create-new-fields').style.display = action === 'create-new' ? 'block' : 'none';
     document.getElementById('existing-fields').style.display = action === 'apply-existing' ? 'block' : 'none';
@@ -1522,7 +1531,8 @@ document.addEventListener('change', function(e) {
 
 // Render create-new name/path fields adapted to the selected policy type
 function browseBtn(targetId) {
-  return `<button type="button" class="btn btn-sm" style="margin-left:6px;padding:3px 8px;font-size:11px" onclick="toggleBrowser('${targetId}')" title="Browse cluster filesystem">Browse…</button>`;
+  const connected = !!cluster;
+  return `<button type="button" class="btn btn-sm" id="browse-btn-${targetId}" style="margin-left:6px;padding:3px 8px;font-size:11px" onclick="toggleBrowser('${targetId}')" title="${connected ? 'Browse cluster filesystem' : 'Connect to a cluster first'}" ${connected ? '' : 'disabled style="margin-left:6px;padding:3px 8px;font-size:11px;opacity:0.4;cursor:not-allowed"'}>Browse…</button>`;
 }
 
 function updateCreateNewFields() {
@@ -1531,18 +1541,45 @@ function updateCreateNewFields() {
   const polId = document.getElementById('apply-policy-select')?.value;
   const pol = policies.find(p => p.id === polId);
   const type = pol ? pol.type : 'nfs';
-  const canBrowse = !!cluster;
-  const bb = canBrowse ? browseBtn('new-fs-path') : '';
+  const bb = browseBtn('new-fs-path');
 
-  const nameLabel = type === 'nfs' ? 'Export path' : type === 'smb' ? 'Share name' : 'Export / Share name';
-  const namePlaceholder = type === 'nfs' ? 'e.g. /exports/projects' : 'e.g. projects';
   const pathPlaceholder = type === 'nfs' ? 'e.g. /data/projects, /data/archive' : 'e.g. /data/projects';
-  const bothNotice = type === 'both'
-    ? '<div class="notice info" style="margin-bottom:10px">Both NFS export and SMB share will be created using the same name and path.</div>'
-    : '';
+
+  if (type === 'both') {
+    container.innerHTML = `
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
+        <input class="form-input" id="new-fs-path" placeholder="e.g. /data/projects, /data/archive">
+        <div id="browser-new-fs-path"></div>
+        <div id="queue-new-fs-path"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">NFS export path <span id="nfs-name-hint" style="font-weight:400;color:var(--text3);font-size:11px;text-transform:none;letter-spacing:0"></span></label>
+        <input class="form-input" id="new-nfs-name" placeholder="e.g. /exports/projects, /exports/archive">
+      </div>
+      <div class="form-group">
+        <label class="form-label">SMB share name <span id="smb-name-hint" style="font-weight:400;color:var(--text3);font-size:11px;text-transform:none;letter-spacing:0"></span></label>
+        <input class="form-input" id="new-smb-name" placeholder="e.g. projects, archive">
+        <div id="smb-name-desc" style="font-size:11px;color:var(--text3);margin-top:3px"></div>
+      </div>`;
+    const fsField = container.querySelector('#new-fs-path');
+    if (fsField) {
+      fsField.addEventListener('input', () => { syncBothNameFields(); updateApplyPreview(); });
+      fsField.addEventListener('blur', parseFsPathField);
+    }
+    container.querySelector('#new-nfs-name')?.addEventListener('input', updateApplyPreview);
+    container.querySelector('#new-smb-name')?.addEventListener('input', updateSmbNameDesc);
+    container.querySelector('#new-nfs-name')?.addEventListener('focusout', parseBothNameFields);
+    container.querySelector('#new-smb-name')?.addEventListener('focusout', parseBothNameFields);
+    syncFsPathField();
+    syncBothNameFields();
+    return;
+  }
+
+  const nameLabel = type === 'nfs' ? 'Export path' : 'Share name';
+  const namePlaceholder = type === 'nfs' ? 'e.g. /exports/projects' : 'e.g. projects';
 
   container.innerHTML = `
-    ${bothNotice}
     <div class="form-group">
       <label class="form-label" style="display:flex;align-items:center">File system path${bb}</label>
       <input class="form-input" id="new-fs-path" placeholder="${pathPlaceholder}">
@@ -1550,9 +1587,9 @@ function updateCreateNewFields() {
       <div id="queue-new-fs-path"></div>
     </div>
     <div class="form-group">
-      <label class="form-label">${nameLabel} <span id="name-field-hint" style="font-weight:400;color:var(--text3);text-transform:none;letter-spacing:0;font-size:11px"></span></label>
+      <label class="form-label">${nameLabel}${type === 'smb' ? ' <span id="name-field-hint" style="font-weight:400;color:var(--text3);text-transform:none;letter-spacing:0;font-size:11px"></span>' : ''}</label>
       <input class="form-input" id="new-share-name" placeholder="${namePlaceholder}">
-      <div id="name-field-desc" style="font-size:11px;color:var(--text3);margin-top:3px"></div>
+      ${type === 'smb' ? '<div id="name-field-desc" style="font-size:11px;color:var(--text3);margin-top:3px"></div>' : ''}
     </div>`;
 
   // Re-wire events
@@ -1563,8 +1600,13 @@ function updateCreateNewFields() {
     fsField.addEventListener('blur', parseFsPathField);
   }
   if (nameField) {
-    nameField.addEventListener('input', updateNameDesc);
-    nameField.addEventListener('focusout', parseNameField);
+    if (type === 'nfs') {
+      nameField.addEventListener('input', updateApplyPreview);
+      nameField.addEventListener('focusout', parseNameField);
+    } else {
+      nameField.addEventListener('input', updateNameDesc);
+      nameField.addEventListener('focusout', parseNameField);
+    }
   }
   syncFsPathField();
   syncNameField();
@@ -1653,22 +1695,51 @@ async function renderBrowser(targetId) {
     const parent = cwd === '/' ? null : cwd.replace(/\/[^\/]+$/, '') || '/';
 
     const sel = browserState[targetId].selected;
+
+    // Build sets of already-used fs_paths to grey out
+    const polId = document.getElementById('apply-policy-select')?.value;
+    const pol   = policies.find(p => p.id === polId);
+    const usedNfs = new Set((clusterShares.nfs || []).map(s => (s.fs_path || '').replace(/\/+$/, '')));
+    const usedSmb = new Set((clusterShares.smb || []).map(s => (s.fs_path || '').replace(/\/+$/, '')));
+
     el.innerHTML = `
     <div class="path-browser">
       <div class="path-browser-bar">
         <span class="pb-cwd">${esc(cwd)}</span>
         <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="addBrowserCwd('${targetId}')">+ Add this dir</button>
-        <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="addBrowserSelected('${targetId}')">+ Add checked</button>
         <button type="button" class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="toggleBrowser('${targetId}')">Close</button>
       </div>
       <div class="path-browser-list">
         ${parent !== null ? `<div class="pb-entry pb-up pb-dir" onclick="browseDir('${targetId}','${esc(parent)}')"><span class="pb-icon">↑</span><span>..</span></div>` : ''}
         ${dirs.length === 0 ? '<div class="pb-loading">No subdirectories</div>' : ''}
         ${dirs.map(d => {
-          const name = d.name;
+          const name     = d.name;
           const fullPath = (cwd === '/' ? '' : cwd) + '/' + name;
-          const checked = sel.has(fullPath) ? 'checked' : '';
-          const selCls  = sel.has(fullPath) ? ' pb-selected' : '';
+          const normPath = fullPath.replace(/\/+$/, '');
+          const checked  = sel.has(fullPath) ? 'checked' : '';
+          const selCls   = sel.has(fullPath) ? ' pb-selected' : '';
+
+          // Check if path already has an NFS export or SMB share
+          const hasNfs = usedNfs.has(normPath);
+          const hasSmb = usedSmb.has(normPath);
+          const isNfsPol = pol && (pol.type === 'nfs' || pol.type === 'both');
+          const isSmbPol = pol && (pol.type === 'smb' || pol.type === 'both');
+          const alreadyUsed = (isNfsPol && hasNfs) || (isSmbPol && hasSmb);
+
+          const existingLabel = [
+            hasNfs && isNfsPol ? 'NFS export exists' : '',
+            hasSmb && isSmbPol ? 'SMB share exists'  : ''
+          ].filter(Boolean).join(', ');
+
+          if (alreadyUsed) {
+            return `<div class="pb-entry pb-dir" style="opacity:0.45;cursor:default" title="${esc(existingLabel)}">
+              <input type="checkbox" class="pb-checkbox" disabled style="cursor:not-allowed">
+              <span class="pb-icon">📁</span>
+              <span style="flex:1">${esc(name)}</span>
+              <span style="font-size:10px;color:var(--warning);font-family:var(--font-ui)">${esc(existingLabel)}</span>
+            </div>`;
+          }
+
           return `<div class="pb-entry pb-dir${selCls}">
             <input type="checkbox" class="pb-checkbox" ${checked} onchange="toggleBrowserCheck('${targetId}','${esc(fullPath)}',this.checked)" onclick="event.stopPropagation()">
             <span class="pb-icon" onclick="browseDir('${targetId}','${esc(fullPath)}')">📁</span>
@@ -1693,9 +1764,12 @@ function toggleBrowserCheck(targetId, path, checked) {
   if (!browserState[targetId]) return;
   if (checked) {
     browserState[targetId].selected.add(path);
+    // Immediately add to queue
+    _enqueuePath(targetId, path);
+    renderPathQueue(targetId);
   } else {
     browserState[targetId].selected.delete(path);
-    // Also remove from the committed queue if it was already added there
+    // Remove from queue
     if (pathQueues[targetId]) {
       pathQueues[targetId] = pathQueues[targetId].filter(e => e.fsPath !== path);
     }
@@ -1703,6 +1777,7 @@ function toggleBrowserCheck(targetId, path, checked) {
   }
   syncFsPathField();
   syncNameField();
+  syncBothNameFields();
   syncExportPathField();
   updateApplyPreview();
 }
@@ -1722,6 +1797,7 @@ function addBrowserSelected(targetId) {
   renderPathQueue(targetId);
   syncFsPathField();
   syncNameField();
+  syncBothNameFields();
   updateApplyPreview();
   renderBrowser(targetId); // redraw browser with checkboxes cleared
 }
@@ -1730,8 +1806,8 @@ function addBrowserSelected(targetId) {
 function _enqueuePath(targetId, fsPath) {
   if (!pathQueues[targetId]) pathQueues[targetId] = [];
   if (pathQueues[targetId].find(e => e.fsPath === fsPath)) return; // no duplicates
-  const defaultName = fsPath.split('/').filter(Boolean).pop() || fsPath;
-  pathQueues[targetId].push({ fsPath, name: defaultName });
+  const smbDefault = fsPath.split('/').filter(Boolean).pop() || fsPath;
+  pathQueues[targetId].push({ fsPath, name: smbDefault, nfsName: fsPath, smbName: smbDefault });
 }
 
 // Public: add a single path and update UI immediately
@@ -1746,6 +1822,7 @@ function removeFromPathQueue(targetId, fsPath) {
   pathQueues[targetId] = pathQueues[targetId].filter(e => e.fsPath !== fsPath);
   renderPathQueue(targetId);
   syncNameField();
+  syncBothNameFields();
   updateApplyPreview();
 }
 
@@ -1770,6 +1847,9 @@ function syncFsPathField() {
 
 // Sync the name field from the queue — comma-separated, one name per path
 function syncNameField() {
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol   = policies.find(p => p.id === polId);
+  if (!pol || pol.type === 'nfs') return; // NFS uses syncExportPathField instead
   const field = document.getElementById('new-share-name');
   if (!field || field === document.activeElement) return; // don't overwrite while typing
   const committed = pathQueues['new-fs-path'] || [];
@@ -1798,6 +1878,9 @@ function syncNameField() {
 // Parse the name field — split by comma and update queue entry names to match
 // Update the name→path mapping description live as user types (no queue mutation)
 function updateNameDesc() {
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol   = policies.find(p => p.id === polId);
+  if (!pol || pol.type === 'nfs') return; // hints only for SMB/Both
   const nameField = document.getElementById('new-share-name');
   const desc      = document.getElementById('name-field-desc');
   const hint      = document.getElementById('name-field-hint');
@@ -1864,65 +1947,99 @@ function parseFsPathField() {
 }
 
 // When multiple NFS paths are queued the export path field is disabled,
-// so use fsPath as the export_path. With a single entry, use the editable name.
+// NFS export path: use nfsName (full fs path by default) or fall back to fsPath
 function nfsExportPath(entry, queueSize) {
-  return queueSize > 1 ? entry.fsPath : (entry.name || entry.fsPath);
+  return entry.nfsName || entry.fsPath;
 }
 
 // Sync the export path field for NFS: grey out + clear when multiple paths are queued/checked,
 // re-enable and pre-fill when exactly one path is present.
-function syncExportPathField() {
-  const polId = document.getElementById('apply-policy-select')?.value;
-  const pol   = policies.find(p => p.id === polId);
-  if (!pol || pol.type !== 'nfs') return; // only applies to NFS
-  const field = document.getElementById('new-share-name');
-  if (!field) return;
-
+// ── Both-protocol name field helpers ──
+function syncBothNameFields() {
   const committed = pathQueues['new-fs-path'] || [];
   const pending   = browserState['new-fs-path']?.selected
     ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
     : [];
-  const total = committed.length + pending.length;
+  const allEntries = [
+    ...committed,
+    ...pending.map(p => ({ fsPath: p, nfsName: p, smbName: p.split('/').filter(Boolean).pop() || p }))
+  ];
+  const nfsField = document.getElementById('new-nfs-name');
+  const smbField = document.getElementById('new-smb-name');
+  if (nfsField && nfsField !== document.activeElement)
+    nfsField.value = allEntries.map(e => e.nfsName || e.fsPath).join(', ');
+  if (smbField && smbField !== document.activeElement)
+    smbField.value = allEntries.map(e => e.smbName || e.name || e.fsPath.split('/').filter(Boolean).pop() || e.fsPath).join(', ');
+  const hint = document.getElementById('nfs-name-hint');
+  if (hint) hint.textContent = allEntries.length > 1 ? `(${allEntries.length}, comma-separated)` : '';
+  updateSmbNameDesc();
+}
 
-  if (total > 1) {
-    field.value = '';
-    field.disabled = true;
-    field.style.opacity = '0.35';
-    field.placeholder = 'Not used — multiple paths selected';
-  } else {
-    field.disabled = false;
-    field.style.opacity = '';
-    field.placeholder = 'e.g. /exports/projects';
-    // If exactly one path, pre-fill with its name if the field is blank
-    if (total === 1) {
-      const only = committed[0] || { name: pending[0]?.split('/').filter(Boolean).pop() || '' };
-      if (!field.value) field.value = only.name || '';
-    }
+function updateSmbNameDesc() {
+  const smbField = document.getElementById('new-smb-name');
+  const desc     = document.getElementById('smb-name-desc');
+  const hint     = document.getElementById('smb-name-hint');
+  if (!smbField || !desc) return;
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const paths = [...committed.map(e => e.fsPath), ...pending];
+  if (paths.length <= 1) { desc.innerHTML = ''; if (hint) hint.textContent = ''; return; }
+  const names = smbField.value.split(',').map(s => s.trim());
+  if (hint) hint.textContent = `(${paths.length}, comma-separated)`;
+  desc.innerHTML = paths.map((p, i) => {
+    const name = names[i] || p.split('/').filter(Boolean).pop() || p;
+    return `<span style="font-family:var(--font)">${esc(name)}</span> → <span style="font-family:var(--font);color:var(--text2)">${esc(p)}</span>`;
+  }).join('<br>');
+}
+
+function parseBothNameFields() {
+  const nfsField = document.getElementById('new-nfs-name');
+  const smbField = document.getElementById('new-smb-name');
+  const committed = pathQueues['new-fs-path'] || [];
+  if (nfsField) {
+    const nfsNames = nfsField.value.split(',').map(s => s.trim());
+    committed.forEach((e, i) => { if (nfsNames[i]) e.nfsName = nfsNames[i]; });
+  }
+  if (smbField) {
+    const smbNames = smbField.value.split(',').map(s => s.trim());
+    committed.forEach((e, i) => { if (smbNames[i]) e.smbName = smbNames[i]; });
+  }
+  updateSmbNameDesc();
+  updateApplyPreview();
+}
+
+// For NFS: sync export path field with queue names (comma-separated), same as SMB share name
+function syncExportPathField() {
+  const polId = document.getElementById('apply-policy-select')?.value;
+  const pol   = policies.find(p => p.id === polId);
+  if (!pol || pol.type !== 'nfs') return;
+  const field = document.getElementById('new-share-name');
+  if (!field || field === document.activeElement) return;
+  const committed = pathQueues['new-fs-path'] || [];
+  const pending   = browserState['new-fs-path']?.selected
+    ? [...browserState['new-fs-path'].selected].filter(p => !committed.find(e => e.fsPath === p))
+    : [];
+  const allEntries = [
+    ...committed,
+    ...pending.map(p => ({ nfsName: p, fsPath: p }))
+  ];
+  // Always enabled — populate with full fs paths as export path defaults
+  field.disabled = false;
+  field.style.opacity = '';
+  if (allEntries.length) {
+    field.value = allEntries.map(e => e.nfsName || e.fsPath).join(', ');
+    field.placeholder = 'e.g. /exports/projects, /exports/archive';
   }
 }
 
 function renderPathQueue(targetId) {
-  const queueEl = document.getElementById('queue-' + targetId);
-  if (!queueEl) return;
-  const queue = pathQueues[targetId] || [];
-  if (!queue.length) { queueEl.innerHTML = ''; syncExportPathField(); return; }
-  const polId = document.getElementById('apply-policy-select')?.value;
-  const pol = policies.find(p => p.id === polId);
-  const type = pol ? pol.type : 'nfs';
-  const nameLabel = type === 'smb' ? 'Share name' : type === 'both' ? 'Export/Share name' : 'Export path';
-  queueEl.innerHTML = `
-    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px">${queue.length} path${queue.length>1?'s':''} queued</div>
-    <div class="pb-queue">
-      ${queue.map(e => `
-      <div class="pb-queue-entry">
-        <div class="pb-queue-path" title="${esc(e.fsPath)}">${esc(e.fsPath)}</div>
-        <input class="form-input" value="${esc(e.name)}" placeholder="${esc(nameLabel)}"
-          oninput="updateQueueName('${targetId}','${esc(e.fsPath)}',this.value)" style="font-size:12px;padding:4px 7px">
-        <div class="pb-queue-actions">
-          <button type="button" class="btn-remove" onclick="removeFromPathQueue('${targetId}','${esc(e.fsPath)}')" title="Remove">×</button>
-        </div>
-      </div>`).join('')}
-    </div>`;
+  // Queue table removed — paths are managed via the comma-separated fields and browser checkboxes.
+  // Just keep the field sync calls.
+  syncFsPathField();
+  syncNameField();
+  syncBothNameFields();
   syncExportPathField();
 }
 
@@ -2039,10 +2156,14 @@ function updateApplyPreview() {
       : [{ fsPath: '<fs_path>', name: '<n>' }];
     const calls = queue.flatMap(entry => {
       const out = [];
-      if (pol.type === 'nfs' || pol.type === 'both')
-        out.push({ _endpoint: `POST /${nfsVer}/nfs/exports/`, body: { ...buildNFSPayload(pol), export_path: nfsExportPath(entry, queue.length), fs_path: entry.fsPath, allow_fs_path_create: apc } });
-      if (pol.type === 'smb' || pol.type === 'both')
-        out.push({ _endpoint: `POST /${smbVer}/smb/shares/`, body: { ...buildSMBPayload(pol), share_name: entry.name, fs_path: entry.fsPath, allow_fs_path_create: apc } });
+      if (pol.type === 'nfs' || pol.type === 'both') {
+        const expPath = pol.type === 'both' ? (entry.nfsName || entry.fsPath) : nfsExportPath(entry, queue.length);
+        out.push({ _endpoint: `POST /${nfsVer}/nfs/exports/`, body: { ...buildNFSPayload(pol), export_path: expPath, fs_path: entry.fsPath, allow_fs_path_create: apc } });
+      }
+      if (pol.type === 'smb' || pol.type === 'both') {
+        const shareName = pol.type === 'both' ? (entry.smbName || entry.name || entry.fsPath.split('/').filter(Boolean).pop() || entry.fsPath) : entry.name;
+        out.push({ _endpoint: `POST /${smbVer}/smb/shares/`, body: { ...buildSMBPayload(pol), share_name: shareName, fs_path: entry.fsPath, allow_fs_path_create: apc } });
+      }
       return out;
     });
     prev.textContent = JSON.stringify(calls.length === 1 ? calls[0] : calls, null, 2);
@@ -2091,14 +2212,16 @@ async function applyPolicy() {
       for (const entry of queue) {
         try {
           if (pol.type === 'nfs' || pol.type === 'both') {
-            const payload = { ...buildNFSPayload(pol), export_path: nfsExportPath(entry, queue.length), fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
+            const expPath = pol.type === 'both' ? (entry.nfsName || entry.fsPath) : nfsExportPath(entry, queue.length);
+            const payload = { ...buildNFSPayload(pol), export_path: expPath, fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
             await versionedFetch('nfs/exports/', 'POST', payload);
-            log('ok', `Created NFS export "${entry.name}" → ${entry.fsPath}`);
+            log('ok', `Created NFS export "${expPath}" → ${entry.fsPath}`);
           }
           if (pol.type === 'smb' || pol.type === 'both') {
-            const payload = { ...buildSMBPayload(pol), share_name: entry.name, fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
+            const shareName = pol.type === 'both' ? (entry.smbName || entry.name || entry.fsPath.split('/').filter(Boolean).pop() || entry.fsPath) : entry.name;
+            const payload = { ...buildSMBPayload(pol), share_name: shareName, fs_path: entry.fsPath, allow_fs_path_create: allowPathCreate };
             await versionedFetch('smb/shares/', 'POST', payload);
-            log('ok', `Created SMB share "${entry.name}" → ${entry.fsPath}`);
+            log('ok', `Created SMB share "${shareName}" → ${entry.fsPath}`);
           }
           successCount++;
         } catch(e) {
